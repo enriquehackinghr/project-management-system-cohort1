@@ -47,10 +47,10 @@ export function Closing() {
           chasing status, and noticing slippage after the date has passed.
         </p>
         <a
-          href="#product"
+          href="/start"
           className="mt-10 inline-flex h-12 items-center rounded-full bg-crust px-8 text-sm font-semibold text-white transition-colors hover:bg-crust-deep"
         >
-          See the system
+          Start project
         </a>
       </div>
     </section>

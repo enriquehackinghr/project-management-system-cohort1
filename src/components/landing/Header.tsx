@@ -30,10 +30,10 @@ export function Header() {
         </nav>
         <div className="hidden md:block">
           <a
-            href="#product"
+            href="/start"
             className="inline-flex h-11 items-center rounded-full bg-crust px-5 text-sm font-medium text-white transition-colors hover:bg-crust-deep"
           >
-            See the system
+            Start project
           </a>
         </div>
         <button
@@ -68,11 +68,11 @@ export function Header() {
               </a>
             ))}
             <a
-              href="#product"
+              href="/start"
               className="mt-2 inline-flex h-12 items-center justify-center rounded-full bg-crust text-sm font-medium text-white"
               onClick={() => setOpen(false)}
             >
-              See the system
+              Start project
             </a>
           </div>
         </nav>

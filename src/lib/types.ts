@@ -1,0 +1,150 @@
+export type SessionPerson = {
+  personId: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  fullName: string;
+};
+
+export type ProjectStatus = "planning" | "active" | "on_hold" | "completed";
+export type TaskStatus = "todo" | "in_progress" | "blocked" | "done";
+export type TaskPriority = "low" | "medium" | "high";
+
+export type Person = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  full_name: string;
+  email: string;
+  role: string | null;
+  capacity_hours_per_week: number;
+  slack_handle: string | null;
+};
+
+export type Project = {
+  id: string;
+  name: string;
+  description: string | null;
+  goal: string | null;
+  owner_id: string;
+  created_by_id: string;
+  start_date: string | null;
+  target_date: string | null;
+  status: ProjectStatus;
+  budget: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectMember = {
+  id: string;
+  project_id: string;
+  person_id: string;
+  role: string | null;
+  person: Person;
+};
+
+export type Phase = {
+  id: string;
+  project_id: string;
+  name: string;
+  sort_order: number;
+  start_date: string | null;
+  end_date: string | null;
+};
+
+export type Task = {
+  id: string;
+  project_id: string;
+  phase_id: string | null;
+  parent_task_id: string | null;
+  title: string;
+  description: string | null;
+  owner_id: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+  estimate_hours: number | null;
+  start_date: string | null;
+  due_date: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TaskDependency = {
+  id: string;
+  predecessor_id: string;
+  successor_id: string;
+};
+
+export type StatusReport = {
+  id: string;
+  project_id: string;
+  generated_body: string;
+  body: string;
+  snapshot: unknown;
+  as_of: string;
+  created_at: string;
+};
+
+export type ProjectBundle = {
+  project: Project;
+  owner: Person | null;
+  members: ProjectMember[];
+  phases: Phase[];
+  tasks: Task[];
+  dependencies: TaskDependency[];
+};
+
+export type Portfolio = {
+  id: string;
+  name: string;
+  created_by_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PortfolioProject = {
+  id: string;
+  portfolio_id: string;
+  project_id: string;
+  color: string;
+  sort_order: number;
+  project: Project;
+};
+
+export type PortfolioBundle = {
+  portfolio: Portfolio;
+  items: PortfolioProject[];
+  projects: Project[];
+  phases: Phase[];
+  tasks: Task[];
+  people: Person[];
+  dependencies: TaskDependency[];
+};
+
+export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
+  todo: "Ready",
+  in_progress: "In progress",
+  blocked: "Blocked",
+  done: "Done",
+};
+
+export const TASK_STATUSES: TaskStatus[] = [
+  "todo",
+  "in_progress",
+  "blocked",
+  "done",
+];
+
+export const PRIORITY_LABEL: Record<TaskPriority, string> = {
+  low: "Low",
+  medium: "Med",
+  high: "High",
+};
+
+export const PROJECT_STATUS_LABEL: Record<ProjectStatus, string> = {
+  planning: "Planning",
+  active: "Active",
+  on_hold: "On hold",
+  completed: "Completed",
+};
