@@ -1,28 +1,22 @@
-import { Audience } from "@/components/landing/Audience";
 import { Closing, Footer, Principles } from "@/components/landing/Closing";
-import { Dashboards } from "@/components/landing/Dashboards";
 import { Features } from "@/components/landing/Features";
 import { Header } from "@/components/landing/Header";
 import { Hero } from "@/components/landing/Hero";
 import { HowItWorks } from "@/components/landing/HowItWorks";
-import { Integrations } from "@/components/landing/Integrations";
-import { Problem } from "@/components/landing/Problem";
 import { ProductShowcase } from "@/components/landing/ProductShowcase";
 
 export default function Home() {
   return (
     <div id="top" className="min-h-full bg-paper">
-      <Header />
-      <main>
+      <div className="landing-hero-dark flex min-h-dvh flex-col">
+        <Header />
         <Hero />
-        <Problem />
+      </div>
+      <main>
         <ProductShowcase />
         <HowItWorks />
         <Principles />
         <Features />
-        <Dashboards />
-        <Integrations />
-        <Audience />
         <Closing />
       </main>
       <Footer />

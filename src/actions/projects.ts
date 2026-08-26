@@ -42,6 +42,7 @@ export async function createProjectFromForm(formData: FormData) {
   });
 
   revalidatePath("/app/projects");
+  revalidatePath("/app/executive", "layout");
   redirect(`/app/projects/${projectId}`);
 }
 

@@ -3,20 +3,31 @@ import type { ButtonHTMLAttributes, ReactNode } from "react";
 export function Field({
   label,
   children,
+  error,
+  hint,
 }: {
   label: string;
   children: ReactNode;
+  error?: string;
+  hint?: string;
 }) {
   return (
     <label className="block">
       <span className="mb-1.5 block text-[13px] font-medium text-mute">{label}</span>
       {children}
+      {error ? (
+        <span className="mt-1.5 block text-[12px] leading-5 text-crust">{error}</span>
+      ) : hint ? (
+        <span className="mt-1.5 block text-[12px] leading-5 text-mute">{hint}</span>
+      ) : null}
     </label>
   );
 }
 
 export const inputClass =
   "h-11 w-full rounded-xl border border-flour bg-white px-3 text-sm text-ink outline-none transition focus:border-crust";
+
+export const selectClass = `${inputClass} bg-[length:12px] pr-8`;
 
 export const textareaClass =
   "min-h-24 w-full rounded-xl border border-flour bg-white px-3 py-2.5 text-sm text-ink outline-none transition focus:border-crust";

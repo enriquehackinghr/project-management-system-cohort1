@@ -17,13 +17,14 @@ const ibmPlexMono = IBM_Plex_Mono({
 const sourceSerif = Source_Serif_4({
   variable: "--font-source-serif",
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
+  weight: ["400", "600", "700"],
+  style: ["normal", "italic"],
 });
 
 export const metadata: Metadata = {
   title: "Baguette — The project operating system",
   description:
-    "Describe a project in plain language. Approve the plan. Run it on a board, a timeline, dashboards, a weekly status, and a risk radar.",
+    "Describe a project, drop a brief, or fill in the form. Approve the plan. Then run it on a board, a timeline, portfolios, dashboards, weekly status, and a risk radar.",
   icons: {
     icon: "/favicon.svg",
   },

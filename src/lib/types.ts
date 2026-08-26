@@ -19,6 +19,10 @@ export type Person = {
   role: string | null;
   capacity_hours_per_week: number;
   slack_handle: string | null;
+  industry: string | null;
+  country: string | null;
+  created_at?: string;
+  last_login_at?: string | null;
 };
 
 export type Project = {
@@ -116,6 +120,15 @@ export type PortfolioBundle = {
   portfolio: Portfolio;
   items: PortfolioProject[];
   projects: Project[];
+  phases: Phase[];
+  tasks: Task[];
+  people: Person[];
+  dependencies: TaskDependency[];
+};
+
+export type AccountBundle = {
+  projects: Project[];
+  colors: Record<string, string>;
   phases: Phase[];
   tasks: Task[];
   people: Person[];

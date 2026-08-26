@@ -16,3 +16,15 @@ export function nextPortfolioColor(used: string[]) {
     PORTFOLIO_COLORS[used.length % PORTFOLIO_COLORS.length]
   );
 }
+
+export function colorsForProjects(projects: Array<{ id: string; name: string }>) {
+  const sorted = [...projects].sort(
+    (left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id),
+  );
+  return Object.fromEntries(
+    sorted.map((project, index) => [
+      project.id,
+      PORTFOLIO_COLORS[index % PORTFOLIO_COLORS.length],
+    ]),
+  ) as Record<string, string>;
+}

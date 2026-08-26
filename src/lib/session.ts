@@ -65,10 +65,18 @@ export async function getSession() {
   }
 }
 
+export function safeNextPath(value: unknown) {
+  if (typeof value !== "string") return "/app/projects";
+  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\")) {
+    return "/app/projects";
+  }
+  return value;
+}
+
 export async function requireSession() {
   const session = await getSession();
   if (!session) {
-    redirect("/start");
+    redirect("/login");
   }
   return session;
 }

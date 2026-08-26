@@ -7,9 +7,9 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
   if (!request.cookies.get(SESSION_COOKIE)?.value) {
-    const start = new URL("/start", request.url);
-    start.searchParams.set("next", request.nextUrl.pathname);
-    return NextResponse.redirect(start);
+    const login = new URL("/login", request.url);
+    login.searchParams.set("next", request.nextUrl.pathname);
+    return NextResponse.redirect(login);
   }
   return NextResponse.next();
 }
