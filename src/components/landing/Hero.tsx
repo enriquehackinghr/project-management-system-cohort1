@@ -16,10 +16,10 @@ export function Hero() {
         </p>
         <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-4">
           <a
-            href="#product"
+            href="/start"
             className="inline-flex h-12 min-w-44 items-center justify-center rounded-full bg-crust px-7 text-sm font-semibold text-white transition-colors hover:bg-crust-deep"
           >
-            See the system
+            Start project
           </a>
           <a
             href="#how"

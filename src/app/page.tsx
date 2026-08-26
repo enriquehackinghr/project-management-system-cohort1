@@ -11,7 +11,7 @@ import { ProductShowcase } from "@/components/landing/ProductShowcase";
 
 export default function Home() {
   return (
-    <div id="top" className="min-h-full">
+    <div id="top" className="min-h-full bg-paper">
       <Header />
       <main>
         <Hero />

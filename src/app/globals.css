@@ -29,6 +29,7 @@
   --color-espresso: var(--espresso);
   --color-cream: var(--cream);
   --font-sans: var(--font-poppins);
+  --font-serif: var(--font-source-serif);
   --font-mono: var(--font-ibm-plex-mono);
 }
 
@@ -36,12 +37,27 @@ html {
   scroll-behavior: smooth;
   scroll-padding-top: 6rem;
   overflow-x: hidden;
+  background: var(--foam);
 }
 
 body {
-  background: var(--paper);
+  background: var(--foam);
   color: var(--ink);
   font-family: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+}
+
+button:not(:disabled),
+[type="button"]:not(:disabled),
+[type="submit"]:not(:disabled),
+[type="reset"]:not(:disabled) {
+  cursor: pointer;
+}
+
+button:disabled,
+[type="button"]:disabled,
+[type="submit"]:disabled,
+[type="reset"]:disabled {
+  cursor: not-allowed;
 }
 
 ::selection {
@@ -53,4 +69,31 @@ body {
   html {
     scroll-behavior: auto;
   }
+}
+
+@keyframes baguette-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+@keyframes baguette-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.baguette-indeterminate {
+  animation: baguette-indeterminate 1.15s ease-in-out infinite;
+}
+
+.baguette-spin {
+  animation: baguette-spin 0.8s linear infinite;
+}
+
+nextjs-portal {
+  display: none;
 }
