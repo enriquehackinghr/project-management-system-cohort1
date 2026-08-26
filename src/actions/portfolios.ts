@@ -6,6 +6,7 @@ import {
   addProjectToPortfolio,
   createPortfolio,
   removeProjectFromPortfolio,
+  updatePortfolioName,
 } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 
@@ -16,6 +17,19 @@ export async function createPortfolioAction(formData: FormData) {
   const portfolio = await createPortfolio(session.personId, name);
   revalidatePath("/app/dashboard");
   redirect(`/app/portfolios/${portfolio.id}`);
+}
+
+export async function renamePortfolioAction(
+  portfolioId: string,
+  formData: FormData,
+) {
+  const session = await requireSession();
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) throw new Error("Portfolio name is required.");
+  await updatePortfolioName(portfolioId, session.personId, name);
+  revalidatePath("/app/dashboard");
+  revalidatePath(`/app/portfolios/${portfolioId}`);
+  revalidatePath(`/app/portfolios/${portfolioId}`, "layout");
 }
 
 export async function addProjectsToPortfolioAction(

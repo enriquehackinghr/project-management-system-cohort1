@@ -20,7 +20,14 @@ export default async function ProjectLayout({
   return (
     <>
       <div className="flex min-h-[calc(100dvh-4rem)]">
-        <ProjectNav projectId={id} name={bundle.project.name} />
+        <ProjectNav
+          projectId={id}
+          name={bundle.project.name}
+          canEdit={
+            bundle.project.owner_id === session.personId ||
+            bundle.project.created_by_id === session.personId
+          }
+        />
         <main className="min-w-0 flex-1 overflow-auto px-5 py-7 sm:px-8 sm:py-8">
           {children}
         </main>

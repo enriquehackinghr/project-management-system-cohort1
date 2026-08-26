@@ -1,19 +1,35 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { askAssistant, confirmAssistantAction } from "@/actions/assistant";
+import {
+  askAssistant,
+  askPortfolioAssistant,
+  confirmAssistantAction,
+  confirmPortfolioAssistantAction,
+} from "@/actions/assistant";
 import type { ProposedAction } from "@/lib/schemas";
 import { BaguetteIcon } from "./AppShell";
 import { PrimaryButton, SecondaryButton, Spinner } from "./ui";
 
 type Turn = { role: "user" | "assistant"; content: string };
 
-export function ProjectAssistant({
-  projectId,
-  projectName,
+function FloatingAssistant({
+  name,
+  emptyPrompt,
+  placeholder,
+  ariaLabel,
+  ask,
+  confirmAction,
 }: {
-  projectId: string;
-  projectName: string;
+  name: string;
+  emptyPrompt: string;
+  placeholder: string;
+  ariaLabel: string;
+  ask: (
+    history: Turn[],
+    text: string,
+  ) => Promise<{ reply: string; proposed_actions: ProposedAction[] }>;
+  confirmAction: (action: ProposedAction) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -30,7 +46,7 @@ export function ProjectAssistant({
     setHistory((prev) => [...prev, { role: "user", content: text }]);
     startTransition(async () => {
       try {
-        const result = await askAssistant(projectId, history, text);
+        const result = await ask(history, text);
         setHistory((prev) => [
           ...prev,
           { role: "assistant", content: result.reply },
@@ -45,7 +61,7 @@ export function ProjectAssistant({
   function confirm(action: ProposedAction) {
     startTransition(async () => {
       try {
-        await confirmAssistantAction(projectId, action);
+        await confirmAction(action);
         setActions((prev) => prev.filter((item) => item !== action));
       } catch (err) {
         setError(err instanceof Error ? err.message : "Could not apply that action.");
@@ -74,7 +90,7 @@ export function ProjectAssistant({
         height: "min(680px, calc(100dvh - 96px))",
       }}
       role="dialog"
-      aria-label="Project assistant"
+      aria-label={ariaLabel}
     >
       <div className="flex items-center justify-between gap-3 bg-crust px-4 py-3.5 text-white">
         <div className="flex min-w-0 items-center gap-3">
@@ -83,7 +99,7 @@ export function ProjectAssistant({
           </span>
           <div className="min-w-0">
             <p className="text-[15px] font-semibold leading-5">Assistant</p>
-            <p className="truncate text-[12px] text-white/80">{projectName}</p>
+            <p className="truncate text-[12px] text-white/80">{name}</p>
           </div>
         </div>
         <button
@@ -99,8 +115,7 @@ export function ProjectAssistant({
       <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-4">
         {history.length === 0 ? (
           <p className="text-[15px] leading-7 break-words text-mute">
-            Ask about this project. Creates, reassigns, and reschedules wait for a
-            confirm button before anything is written.
+            {emptyPrompt}
           </p>
         ) : null}
         <div className="space-y-3">
@@ -166,7 +181,7 @@ export function ProjectAssistant({
             }
           }}
           rows={3}
-          placeholder="Ask about this project…"
+          placeholder={placeholder}
           disabled={pending}
           className="min-h-[4.5rem] w-full resize-none overflow-y-auto rounded-xl border border-flour bg-foam/60 px-3 py-2.5 text-[15px] leading-6 text-ink break-words whitespace-pre-wrap outline-none focus:border-crust"
         />
@@ -182,5 +197,45 @@ export function ProjectAssistant({
         </div>
       </div>
     </div>
+  );
+}
+
+export function ProjectAssistant({
+  projectId,
+  projectName,
+}: {
+  projectId: string;
+  projectName: string;
+}) {
+  return (
+    <FloatingAssistant
+      name={projectName}
+      emptyPrompt="Ask about this project. Creates, reassigns, and reschedules wait for a confirm button before anything is written."
+      placeholder="Ask about this project…"
+      ariaLabel="Project assistant"
+      ask={(history, text) => askAssistant(projectId, history, text)}
+      confirmAction={(action) => confirmAssistantAction(projectId, action)}
+    />
+  );
+}
+
+export function PortfolioAssistant({
+  portfolioId,
+  portfolioName,
+}: {
+  portfolioId: string;
+  portfolioName: string;
+}) {
+  return (
+    <FloatingAssistant
+      name={portfolioName}
+      emptyPrompt="Ask about this portfolio or a project in it. Task writes and portfolio changes wait for a confirm button before anything is written."
+      placeholder="Ask about this portfolio…"
+      ariaLabel="Portfolio assistant"
+      ask={(history, text) => askPortfolioAssistant(portfolioId, history, text)}
+      confirmAction={(action) =>
+        confirmPortfolioAssistantAction(portfolioId, action)
+      }
+    />
   );
 }

@@ -1,9 +1,18 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { removeProjectFromPortfolioAction } from "@/actions/portfolios";
+import {
+  removeProjectFromPortfolioAction,
+  renamePortfolioAction,
+} from "@/actions/portfolios";
+import { EditableName } from "@/components/app/EditableName";
 import { AddProjectsForm } from "@/components/app/PortfolioForms";
-import { Card, ProgressBar, SecondaryButton } from "@/components/app/ui";
-import { getAccessiblePortfolio, listProjectsForPerson } from "@/lib/db";
+import { AddPeopleToWorkForm } from "@/components/app/TeamForms";
+import { Card, Pill, ProgressBar, SecondaryButton } from "@/components/app/ui";
+import {
+  getAccessiblePortfolio,
+  listOwnedTeamMemberPeople,
+  listProjectsForPerson,
+} from "@/lib/db";
 import { formatDate } from "@/lib/dates";
 import { requireSession } from "@/lib/session";
 import { PROJECT_STATUS_LABEL } from "@/lib/types";
@@ -21,8 +30,16 @@ export default async function PortfolioOverviewPage({
   ]);
   if (!bundle) notFound();
 
+  const canManage = bundle.portfolio.created_by_id === session.personId;
   const memberIds = new Set(bundle.items.map((item) => item.project_id));
-  const available = accessible.filter((project) => !memberIds.has(project.id));
+  const available = canManage
+    ? accessible.filter((project) => !memberIds.has(project.id))
+    : [];
+  const teamPeople = canManage
+    ? (await listOwnedTeamMemberPeople(session.personId)).filter(
+        (person) => !bundle.members.some((member) => member.person_id === person.id),
+      )
+    : [];
   const done = bundle.tasks.filter((task) => task.status === "done").length;
   const pct =
     bundle.tasks.length === 0 ? 0 : Math.round((done / bundle.tasks.length) * 100);
@@ -31,9 +48,15 @@ export default async function PortfolioOverviewPage({
     <div className="space-y-6">
       <Card>
         <p className="text-sm text-mute">Portfolio</p>
-        <h2 className="mt-1 text-2xl font-semibold tracking-tight">
-          {bundle.portfolio.name}
-        </h2>
+        <div className="mt-1">
+          <EditableName
+            name={bundle.portfolio.name}
+            label="Portfolio name"
+            action={renamePortfolioAction.bind(null, id)}
+            size="page"
+            canEdit={canManage}
+          />
+        </div>
         <p className="mt-2 text-sm leading-6 text-mute">
           Combined board and timeline for every project in this set. Moving a card
           here updates the same task inside the project.
@@ -88,19 +111,42 @@ export default async function PortfolioOverviewPage({
                       </p>
                     </div>
                   </div>
-                  <form action={remove}>
-                    <SecondaryButton type="submit" className="h-9 px-3 text-xs">
-                      Remove
-                    </SecondaryButton>
-                  </form>
+                  {canManage ? (
+                    <form action={remove}>
+                      <SecondaryButton type="submit" className="h-9 px-3 text-xs">
+                        Remove
+                      </SecondaryButton>
+                    </form>
+                  ) : null}
                 </li>
               );
             })}
           </ul>
         )}
-        <p className="mb-3 text-sm font-medium">Add projects</p>
-        <AddProjectsForm portfolioId={id} projects={available} />
+        {canManage ? (
+          <>
+            <p className="mb-3 text-sm font-medium">Add projects</p>
+            <AddProjectsForm portfolioId={id} projects={available} />
+          </>
+        ) : null}
       </section>
+
+      {canManage ? (
+        <section className="rounded-2xl border border-flour bg-white p-5">
+          <h2 className="mb-1 text-lg font-semibold tracking-tight">Team access</h2>
+          <p className="mb-4 text-sm leading-6 text-mute">
+            People added here see this portfolio and each of its projects in their own app.
+          </p>
+          <div className="mb-4 flex flex-wrap gap-2">
+            {bundle.members.map((member) => (
+              <Pill key={member.id}>
+                {member.person.full_name} · {member.role || "Member"}
+              </Pill>
+            ))}
+          </div>
+          <AddPeopleToWorkForm actionId={id} kind="portfolio" people={teamPeople} />
+        </section>
+      ) : null}
     </div>
   );
 }
