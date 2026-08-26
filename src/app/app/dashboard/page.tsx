@@ -14,7 +14,7 @@ export default async function PortfoliosPage() {
       <PageHeader
         kicker="Portfolio"
         title="Your portfolios"
-        description="Group projects together. Open a portfolio to run a combined board and timeline. Status changes write back to each project."
+        description="Group projects together, or open a portfolio you were added to. Status changes write back to each project."
       />
       <Card className="mb-8">
         <p className="mb-3 text-sm font-medium">New portfolio</p>

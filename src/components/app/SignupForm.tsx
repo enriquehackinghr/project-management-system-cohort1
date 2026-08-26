@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useId, useState } from "react";
 import { signUp } from "@/actions/session";
 import { COUNTRIES } from "@/lib/countries";
 import { INDUSTRIES } from "@/lib/industries";
@@ -72,21 +72,20 @@ export function SignupForm({ next }: { next?: string }) {
           aria-invalid={Boolean(state?.errors?.emailConfirm)}
         />
       </Field>
-      <Field
+      <PasswordField
         label="Password"
+        name="password"
+        autoComplete="new-password"
+        minLength={8}
         error={state?.errors?.password?.[0]}
         hint="At least 8 characters, with a letter and a number."
-      >
-        <input
-          className={inputClass}
-          name="password"
-          type="password"
-          required
-          minLength={8}
-          autoComplete="new-password"
-          aria-invalid={Boolean(state?.errors?.password)}
-        />
-      </Field>
+      />
+      <PasswordField
+        label="Confirm password"
+        name="passwordConfirm"
+        autoComplete="new-password"
+        error={state?.errors?.passwordConfirm?.[0]}
+      />
       <Field label="Industry" error={state?.errors?.industry?.[0]}>
         <select
           className={selectClass}
@@ -134,5 +133,98 @@ export function SignupForm({ next }: { next?: string }) {
         </Link>
       </p>
     </form>
+  );
+}
+
+function PasswordField({
+  label,
+  name,
+  autoComplete,
+  minLength,
+  error,
+  hint,
+}: {
+  label: string;
+  name: string;
+  autoComplete: string;
+  minLength?: number;
+  error?: string;
+  hint?: string;
+}) {
+  const id = useId();
+  const [visible, setVisible] = useState(false);
+
+  return (
+    <div className="block">
+      <label htmlFor={id} className="mb-1.5 block text-[13px] font-medium text-mute">
+        {label}
+      </label>
+      <div className="relative">
+        <input
+          id={id}
+          className={`${inputClass} pr-11`}
+          name={name}
+          type={visible ? "text" : "password"}
+          required
+          minLength={minLength}
+          autoComplete={autoComplete}
+          aria-invalid={Boolean(error)}
+        />
+        <button
+          type="button"
+          className="absolute inset-y-0 right-0 flex w-11 cursor-pointer items-center justify-center text-mute transition-colors hover:text-ink"
+          aria-label={visible ? "Hide password" : "Show password"}
+          aria-pressed={visible}
+          onClick={() => setVisible((current) => !current)}
+        >
+          {visible ? <EyeOffIcon /> : <EyeIcon />}
+        </button>
+      </div>
+      {error ? (
+        <span className="mt-1.5 block text-[12px] leading-5 text-crust">{error}</span>
+      ) : hint ? (
+        <span className="mt-1.5 block text-[12px] leading-5 text-mute">{hint}</span>
+      ) : null}
+    </div>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden="true">
+      <path
+        d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="2.6" stroke="currentColor" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden="true">
+      <path
+        d="M3 3l18 18"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+      <path
+        d="M9.9 5.4A10.4 10.4 0 0 1 12 5c6 0 9.5 7 9.5 7a16.4 16.4 0 0 1-3.3 4.3M6.6 6.8C4.2 8.5 2.5 12 2.5 12S6 19 12 19c1.5 0 2.9-.4 4.1-1"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9.9 9.9a2.6 2.6 0 0 0 3.7 3.7"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }

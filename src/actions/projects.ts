@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { addProjectMember, createManualProject } from "@/lib/db";
+import { addProjectMember, createManualProject, updateProjectName } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 
 export async function createProjectFromForm(formData: FormData) {
@@ -44,6 +44,18 @@ export async function createProjectFromForm(formData: FormData) {
   revalidatePath("/app/projects");
   revalidatePath("/app/executive", "layout");
   redirect(`/app/projects/${projectId}`);
+}
+
+export async function renameProjectAction(projectId: string, formData: FormData) {
+  const session = await requireSession();
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) throw new Error("Project name is required.");
+  await updateProjectName(projectId, session.personId, name);
+  revalidatePath(`/app/projects/${projectId}`, "layout");
+  revalidatePath("/app/projects");
+  revalidatePath("/app/dashboard");
+  revalidatePath("/app/portfolios", "layout");
+  revalidatePath("/app/executive", "layout");
 }
 
 export async function addMemberToProject(projectId: string, formData: FormData) {

@@ -20,6 +20,7 @@ export const signupSchema = z
       .min(8, { message: "Use at least 8 characters." })
       .regex(/[A-Za-z]/, { message: "Include at least one letter." })
       .regex(/[0-9]/, { message: "Include at least one number." }),
+    passwordConfirm: z.string().min(1, { message: "Confirm your password." }),
     industry: z
       .string()
       .min(1, { message: "Select an industry." })
@@ -33,6 +34,10 @@ export const signupSchema = z
   .refine((value) => value.email === value.emailConfirm, {
     message: "Email addresses must match.",
     path: ["emailConfirm"],
+  })
+  .refine((value) => value.password === value.passwordConfirm, {
+    message: "Passwords must match.",
+    path: ["passwordConfirm"],
   });
 
 export const loginSchema = z.object({
@@ -49,6 +54,7 @@ export type SignupFormState =
         email?: string[];
         emailConfirm?: string[];
         password?: string[];
+        passwordConfirm?: string[];
         industry?: string[];
         country?: string[];
       };
@@ -165,10 +171,15 @@ export const assistantSchema = z.object({
         "reassign_task",
         "reschedule_task",
         "update_status",
+        "rename_portfolio",
+        "add_project",
+        "remove_project",
       ]),
       summary: z.string(),
       title: z.string().nullable(),
       task_id: z.string().nullable(),
+      project_id: z.string().nullable(),
+      name: z.string().nullable(),
       owner_email: z.string().nullable(),
       start_date: z.string().nullable(),
       due_date: z.string().nullable(),

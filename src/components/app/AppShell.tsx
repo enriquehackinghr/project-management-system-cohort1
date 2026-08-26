@@ -3,8 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { renamePortfolioAction } from "@/actions/portfolios";
+import { renameProjectAction } from "@/actions/projects";
 import { logOut } from "@/actions/session";
 import type { SessionPerson } from "@/lib/types";
+import { EditableName } from "./EditableName";
 
 export function BaguetteIcon({
   className = "h-[18px] w-[18px]",
@@ -86,6 +89,9 @@ export function AppShell({
               <NavItem href="/app/projects" active={pathname.startsWith("/app/projects")}>
                 Projects
               </NavItem>
+              <NavItem href="/app/teams" active={pathname.startsWith("/app/teams")}>
+                Teams
+              </NavItem>
               <NavItem
                 href="/app/dashboard"
                 active={
@@ -161,9 +167,11 @@ const PROJECT_LINKS = [
 export function ProjectNav({
   projectId,
   name,
+  canEdit = true,
 }: {
   projectId: string;
   name: string;
+  canEdit?: boolean;
 }) {
   const pathname = usePathname();
   const base = `/app/projects/${projectId}`;
@@ -176,9 +184,14 @@ export function ProjectNav({
       >
         All projects
       </Link>
-      <h1 className="mt-2 px-2 text-[15px] font-semibold leading-snug tracking-tight">
-        {name}
-      </h1>
+      <div className="mt-2 px-2">
+        <EditableName
+          name={name}
+          label="Project name"
+          action={renameProjectAction.bind(null, projectId)}
+          canEdit={canEdit}
+        />
+      </div>
       <nav className="mt-6 space-y-0.5">
         {PROJECT_LINKS.map(([label, suffix]) => {
           const href = `${base}${suffix}`;
@@ -220,9 +233,11 @@ const EXECUTIVE_LINKS = [
 export function PortfolioNav({
   portfolioId,
   name,
+  canEdit = true,
 }: {
   portfolioId: string;
   name: string;
+  canEdit?: boolean;
 }) {
   const pathname = usePathname();
   const base = `/app/portfolios/${portfolioId}`;
@@ -235,9 +250,14 @@ export function PortfolioNav({
       >
         All portfolios
       </Link>
-      <h1 className="mt-2 px-2 text-[15px] font-semibold leading-snug tracking-tight">
-        {name}
-      </h1>
+      <div className="mt-2 px-2">
+        <EditableName
+          name={name}
+          label="Portfolio name"
+          action={renamePortfolioAction.bind(null, portfolioId)}
+          canEdit={canEdit}
+        />
+      </div>
       <nav className="mt-6 space-y-0.5">
         {PORTFOLIO_LINKS.map(([label, suffix]) => {
           const href = `${base}${suffix}`;

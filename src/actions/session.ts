@@ -47,6 +47,7 @@ export async function signUp(
   const parsed = signupSchema.safeParse({
     ...values,
     password: formData.get("password"),
+    passwordConfirm: formData.get("passwordConfirm"),
     next: formData.get("next") || undefined,
   });
 

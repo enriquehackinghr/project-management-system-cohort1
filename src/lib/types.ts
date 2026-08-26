@@ -116,6 +116,14 @@ export type PortfolioProject = {
   project: Project;
 };
 
+export type PortfolioMember = {
+  id: string;
+  portfolio_id: string;
+  person_id: string;
+  role: string | null;
+  person: Person;
+};
+
 export type PortfolioBundle = {
   portfolio: Portfolio;
   items: PortfolioProject[];
@@ -124,6 +132,30 @@ export type PortfolioBundle = {
   tasks: Task[];
   people: Person[];
   dependencies: TaskDependency[];
+  members: PortfolioMember[];
+};
+
+export type Team = {
+  id: string;
+  name: string;
+  created_by_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TeamMember = {
+  id: string;
+  team_id: string;
+  person_id: string;
+  role: string | null;
+  person: Person;
+};
+
+export type TeamBundle = {
+  team: Team;
+  members: TeamMember[];
+  projects: Project[];
+  portfolios: Portfolio[];
 };
 
 export type AccountBundle = {

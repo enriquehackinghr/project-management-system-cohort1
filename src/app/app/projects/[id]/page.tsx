@@ -1,7 +1,10 @@
 import { notFound } from "next/navigation";
-import { MemberForm, PhaseForm, TaskForm } from "@/components/app/ProjectForms";
+import { renameProjectAction } from "@/actions/projects";
+import { EditableName } from "@/components/app/EditableName";
+import { PhaseForm, TaskForm } from "@/components/app/ProjectForms";
+import { AddPeopleToWorkForm } from "@/components/app/TeamForms";
 import { Card, Pill, ProgressBar } from "@/components/app/ui";
-import { getAccessibleProject } from "@/lib/db";
+import { getAccessibleProject, listOwnedTeamMemberPeople } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
 import { requireSession } from "@/lib/session";
 import { PROJECT_STATUS_LABEL } from "@/lib/types";
@@ -17,6 +20,14 @@ export default async function ProjectOverviewPage({
   if (!bundle) notFound();
 
   const people = bundle.members.map((member) => member.person).filter(Boolean);
+  const canManage =
+    bundle.project.owner_id === session.personId ||
+    bundle.project.created_by_id === session.personId;
+  const teamPeople = canManage
+    ? (await listOwnedTeamMemberPeople(session.personId)).filter(
+        (person) => !bundle.members.some((member) => member.person_id === person.id),
+      )
+    : [];
   const done = bundle.tasks.filter((task) => task.status === "done").length;
   const pct =
     bundle.tasks.length === 0
@@ -28,7 +39,14 @@ export default async function ProjectOverviewPage({
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
-            <p className="text-sm text-mute">{bundle.owner?.full_name ?? "Unowned"}</p>
+            <EditableName
+              name={bundle.project.name}
+              label="Project name"
+              action={renameProjectAction.bind(null, id)}
+              size="page"
+              canEdit={canManage}
+            />
+            <p className="mt-2 text-sm text-mute">{bundle.owner?.full_name ?? "Unowned"}</p>
             <p className="mt-2 text-sm leading-6">{bundle.project.goal}</p>
             <p className="mt-4 text-sm text-mute">
               {formatDate(bundle.project.start_date)} → {formatDate(bundle.project.target_date)}
@@ -59,7 +77,12 @@ export default async function ProjectOverviewPage({
             </Pill>
           ))}
         </div>
-        <MemberForm projectId={id} />
+        {canManage ? (
+          <>
+            <p className="mb-3 text-sm font-medium">Add from your teams</p>
+            <AddPeopleToWorkForm actionId={id} kind="project" people={teamPeople} />
+          </>
+        ) : null}
       </section>
 
       <section className="rounded-2xl border border-flour bg-white p-5">
