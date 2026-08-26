@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
-import { switchPerson } from "@/actions/session";
+import { logOut } from "@/actions/session";
 import type { SessionPerson } from "@/lib/types";
 
 export function BaguetteIcon({
@@ -52,6 +52,10 @@ function isPortfolioWorkspace(pathname: string) {
   return /^\/app\/portfolios\/[^/]+/.test(pathname);
 }
 
+function isExecutiveWorkspace(pathname: string) {
+  return pathname.startsWith("/app/executive");
+}
+
 export function AppShell({
   person,
   children,
@@ -65,7 +69,9 @@ export function AppShell({
   }
 
   const projectWorkspace =
-    isProjectWorkspace(pathname) || isPortfolioWorkspace(pathname);
+    isProjectWorkspace(pathname) ||
+    isPortfolioWorkspace(pathname) ||
+    isExecutiveWorkspace(pathname);
 
   return (
     <div className="flex min-h-dvh flex-col bg-foam">
@@ -89,16 +95,22 @@ export function AppShell({
               >
                 Portfolio
               </NavItem>
+              <NavItem
+                href="/app/executive"
+                active={pathname.startsWith("/app/executive")}
+              >
+                Executive Dashboard
+              </NavItem>
             </nav>
           </div>
           <div className="flex items-center gap-3">
             <p className="hidden text-sm text-mute sm:block">{person.firstName}</p>
-            <form action={switchPerson}>
+            <form action={logOut}>
               <button
                 type="submit"
                 className="text-sm font-medium text-mute hover:text-ink"
               >
-                Switch person
+                Log out
               </button>
             </form>
             <Link href="/" className="text-sm font-medium text-mute hover:text-ink">
@@ -199,6 +211,12 @@ const PORTFOLIO_LINKS = [
   ["Timeline", "/timeline"],
 ] as const;
 
+const EXECUTIVE_LINKS = [
+  ["Overview", ""],
+  ["Board", "/board"],
+  ["Timeline", "/timeline"],
+] as const;
+
 export function PortfolioNav({
   portfolioId,
   name,
@@ -222,6 +240,42 @@ export function PortfolioNav({
       </h1>
       <nav className="mt-6 space-y-0.5">
         {PORTFOLIO_LINKS.map(([label, suffix]) => {
+          const href = `${base}${suffix}`;
+          const active =
+            suffix === ""
+              ? pathname === base || pathname === `${base}/`
+              : pathname.startsWith(href);
+          return (
+            <Link
+              key={label}
+              href={href}
+              className={`block rounded-xl px-3 py-2 text-sm ${
+                active
+                  ? "bg-foam font-semibold text-ink"
+                  : "font-medium text-mute hover:bg-foam/80 hover:text-ink"
+              }`}
+            >
+              {label}
+            </Link>
+          );
+        })}
+      </nav>
+    </aside>
+  );
+}
+
+export function ExecutiveNav() {
+  const pathname = usePathname();
+  const base = "/app/executive";
+
+  return (
+    <aside className="flex w-[232px] shrink-0 flex-col border-r border-flour bg-white px-3 py-5">
+      <p className="px-2 text-[12px] font-medium text-mute">Account</p>
+      <h1 className="mt-2 px-2 text-[15px] font-semibold leading-snug tracking-tight">
+        Executive Dashboard
+      </h1>
+      <nav className="mt-6 space-y-0.5">
+        {EXECUTIVE_LINKS.map(([label, suffix]) => {
           const href = `${base}${suffix}`;
           const active =
             suffix === ""

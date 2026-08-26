@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminClient } from "./supabase/admin";
 import type {
+  AccountBundle,
   Person,
   Phase,
   Portfolio,
@@ -15,7 +16,7 @@ import type {
   TaskDependency,
 } from "./types";
 import { joinName } from "./names";
-import { nextPortfolioColor } from "./portfolio-colors";
+import { colorsForProjects, nextPortfolioColor } from "./portfolio-colors";
 
 const admin = () => createAdminClient();
 
@@ -55,6 +56,92 @@ export async function getPersonById(id: string) {
     .maybeSingle();
   throwIfError(error);
   return data as Person | null;
+}
+
+export async function getPersonByEmail(email: string) {
+  const { data, error } = await admin()
+    .from("people")
+    .select("*")
+    .eq("email", email.trim().toLowerCase())
+    .maybeSingle();
+  throwIfError(error);
+  return data as Person | null;
+}
+
+export async function updatePersonProfile(
+  personId: string,
+  input: {
+    firstName: string;
+    lastName: string;
+    industry: string;
+    country: string;
+  },
+) {
+  const { data, error } = await admin()
+    .from("people")
+    .update({
+      first_name: input.firstName.trim(),
+      last_name: input.lastName.trim(),
+      industry: input.industry,
+      country: input.country,
+    })
+    .eq("id", personId)
+    .select("*")
+    .single();
+  throwIfError(error);
+  return data as Person;
+}
+
+export async function getAccountByPersonId(personId: string) {
+  const { data, error } = await admin()
+    .from("accounts")
+    .select("person_id")
+    .eq("person_id", personId)
+    .maybeSingle();
+  throwIfError(error);
+  return data as { person_id: string } | null;
+}
+
+export async function getPasswordHashForPerson(personId: string) {
+  const { data, error } = await admin()
+    .from("accounts")
+    .select("password_hash")
+    .eq("person_id", personId)
+    .maybeSingle();
+  throwIfError(error);
+  return (data?.password_hash as string | undefined) ?? null;
+}
+
+export async function createAccount(personId: string, passwordHash: string) {
+  const now = new Date().toISOString();
+  const { error } = await admin().from("accounts").insert({
+    person_id: personId,
+    password_hash: passwordHash,
+    last_login_at: now,
+  });
+  if (error?.code === "23505") {
+    throw new Error("An account with this email already exists.");
+  }
+  throwIfError(error);
+  await stampLastLogin(personId, now);
+}
+
+export async function recordLastLogin(personId: string) {
+  await stampLastLogin(personId, new Date().toISOString());
+}
+
+async function stampLastLogin(personId: string, at: string) {
+  const db = admin();
+  const { error: accountError } = await db
+    .from("accounts")
+    .update({ last_login_at: at })
+    .eq("person_id", personId);
+  throwIfError(accountError);
+  const { error: personError } = await db
+    .from("people")
+    .update({ last_login_at: at })
+    .eq("id", personId);
+  throwIfError(personError);
 }
 
 export async function listProjectsForPerson(personId: string) {
@@ -524,6 +611,27 @@ export async function getAccessiblePortfolio(
   } catch {
     return null;
   }
+}
+
+export async function getAccountProjectBundle(
+  personId: string,
+): Promise<AccountBundle> {
+  const projects = await listProjectsForPerson(personId);
+  const projectIds = projects.map((project) => project.id);
+  const [tasks, phases, people] = await Promise.all([
+    listTasksForProjects(projectIds),
+    listPhasesForProjects(projectIds),
+    listPeopleForProjects(projectIds),
+  ]);
+  const dependencies = await listDependenciesForTasks(tasks.map((task) => task.id));
+  return {
+    projects,
+    colors: colorsForProjects(projects),
+    phases,
+    tasks,
+    people,
+    dependencies,
+  };
 }
 
 export async function createPortfolio(personId: string, name: string) {

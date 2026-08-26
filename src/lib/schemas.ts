@@ -1,4 +1,81 @@
 import { z } from "zod";
+import { isCountry } from "./countries";
+import { isIndustry } from "./industries";
+
+const requiredName = (label: string) =>
+  z
+    .string()
+    .trim()
+    .min(1, { message: `Enter your ${label}.` })
+    .max(80, { message: `${label.charAt(0).toUpperCase()}${label.slice(1)} is too long.` });
+
+export const signupSchema = z
+  .object({
+    firstName: requiredName("first name"),
+    lastName: requiredName("last name"),
+    email: z.email({ message: "Enter a valid email." }).trim().toLowerCase(),
+    emailConfirm: z.email({ message: "Enter a valid email." }).trim().toLowerCase(),
+    password: z
+      .string()
+      .min(8, { message: "Use at least 8 characters." })
+      .regex(/[A-Za-z]/, { message: "Include at least one letter." })
+      .regex(/[0-9]/, { message: "Include at least one number." }),
+    industry: z
+      .string()
+      .min(1, { message: "Select an industry." })
+      .refine(isIndustry, { message: "Select an industry from the list." }),
+    country: z
+      .string()
+      .min(1, { message: "Select a country." })
+      .refine(isCountry, { message: "Select a country from the list." }),
+    next: z.string().optional(),
+  })
+  .refine((value) => value.email === value.emailConfirm, {
+    message: "Email addresses must match.",
+    path: ["emailConfirm"],
+  });
+
+export const loginSchema = z.object({
+  email: z.email({ message: "Enter a valid email." }).trim().toLowerCase(),
+  password: z.string().min(1, { message: "Enter your password." }),
+  next: z.string().optional(),
+});
+
+export type SignupFormState =
+  | {
+      errors?: {
+        firstName?: string[];
+        lastName?: string[];
+        email?: string[];
+        emailConfirm?: string[];
+        password?: string[];
+        industry?: string[];
+        country?: string[];
+      };
+      message?: string;
+      values?: {
+        firstName?: string;
+        lastName?: string;
+        email?: string;
+        emailConfirm?: string;
+        industry?: string;
+        country?: string;
+      };
+    }
+  | undefined;
+
+export type LoginFormState =
+  | {
+      errors?: {
+        email?: string[];
+        password?: string[];
+      };
+      message?: string;
+      values?: {
+        email?: string;
+      };
+    }
+  | undefined;
 
 export const chatTurnSchema = z.object({
   role: z.enum(["user", "assistant"]),

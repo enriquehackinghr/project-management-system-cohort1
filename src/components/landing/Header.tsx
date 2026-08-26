@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState } from "react";
 import { Logo } from "./Logo";
 
@@ -7,53 +8,58 @@ const links = [
   { href: "#product", label: "Product" },
   { href: "#how", label: "How it works" },
   { href: "#features", label: "Features" },
-  { href: "#integrations", label: "Integrations" },
 ];
 
 export function Header() {
   const [open, setOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-50 border-b border-flour/80 bg-white/90 backdrop-blur-md">
-      <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-6 sm:px-10">
-        <Logo />
-        <nav className="hidden items-center gap-10 md:flex" aria-label="Primary">
+    <header className="sticky top-0 z-50 border-b border-white/10 bg-[#111318]/80 backdrop-blur-xl">
+      <div className="mx-auto grid h-16 max-w-7xl grid-cols-[1fr_auto] items-center px-5 sm:px-8 lg:grid-cols-[1fr_auto_1fr]">
+        <Logo tone="light" />
+        <nav className="hidden items-center gap-8 lg:flex" aria-label="Primary">
           {links.map((link) => (
             <a
               key={link.href}
               href={link.href}
-              className="text-[15px] font-medium text-mute transition-colors hover:text-ink"
+              className="text-[14px] font-medium text-white/70 transition-colors hover:text-white"
             >
               {link.label}
             </a>
           ))}
         </nav>
-        <div className="hidden md:block">
-          <a
-            href="/start"
-            className="inline-flex h-11 items-center rounded-full bg-crust px-5 text-sm font-medium text-white transition-colors hover:bg-crust-deep"
+        <div className="flex items-center justify-end gap-3">
+          <Link
+            href="/login"
+            className="hidden text-sm font-medium text-white/70 transition-colors hover:text-white sm:inline"
           >
-            Start project
-          </a>
+            Log in
+          </Link>
+          <Link
+            href="/signup"
+            className="hidden h-10 items-center rounded-full bg-crust px-4 text-sm font-medium text-white transition-colors hover:bg-crust-deep sm:inline-flex"
+          >
+            Sign up
+          </Link>
+          <button
+            type="button"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/15 lg:hidden"
+            aria-expanded={open}
+            aria-controls="mobile-nav"
+            onClick={() => setOpen((value) => !value)}
+          >
+            <span className="sr-only">Menu</span>
+            <span className="flex flex-col gap-1.5">
+              <span className={`h-px w-4 bg-white transition ${open ? "translate-y-[4px] rotate-45" : ""}`} />
+              <span className={`h-px w-4 bg-white transition ${open ? "-translate-y-[3px] -rotate-45" : ""}`} />
+            </span>
+          </button>
         </div>
-        <button
-          type="button"
-          className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-flour md:hidden"
-          aria-expanded={open}
-          aria-controls="mobile-nav"
-          onClick={() => setOpen((value) => !value)}
-        >
-          <span className="sr-only">Menu</span>
-          <span className="flex flex-col gap-1.5">
-            <span className={`h-px w-4 bg-ink transition ${open ? "translate-y-[4px] rotate-45" : ""}`} />
-            <span className={`h-px w-4 bg-ink transition ${open ? "-translate-y-[3px] -rotate-45" : ""}`} />
-          </span>
-        </button>
       </div>
       {open ? (
         <nav
           id="mobile-nav"
-          className="border-t border-flour px-6 py-6 md:hidden"
+          className="border-t border-white/10 px-5 py-5 lg:hidden"
           aria-label="Mobile"
         >
           <div className="flex flex-col gap-4">
@@ -61,19 +67,26 @@ export function Header() {
               <a
                 key={link.href}
                 href={link.href}
-                className="text-base font-medium text-ink"
+                className="text-base font-medium text-white"
                 onClick={() => setOpen(false)}
               >
                 {link.label}
               </a>
             ))}
-            <a
-              href="/start"
-              className="mt-2 inline-flex h-12 items-center justify-center rounded-full bg-crust text-sm font-medium text-white"
+            <Link
+              href="/login"
+              className="mt-1 text-base font-medium text-white/80"
               onClick={() => setOpen(false)}
             >
-              Start project
-            </a>
+              Log in
+            </Link>
+            <Link
+              href="/signup"
+              className="inline-flex h-12 items-center justify-center rounded-full bg-crust text-sm font-medium text-white"
+              onClick={() => setOpen(false)}
+            >
+              Sign up
+            </Link>
           </div>
         </nav>
       ) : null}

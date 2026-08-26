@@ -94,5 +94,6 @@ export async function approvePlan(draft: PlanDraft) {
   });
 
   revalidatePath("/app/projects");
+  revalidatePath("/app/executive", "layout");
   return projectId;
 }

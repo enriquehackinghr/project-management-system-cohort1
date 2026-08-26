@@ -47,6 +47,7 @@ export async function moveTask(
   revalidatePath(`/app/projects/${projectId}/board`);
   revalidatePath("/app/dashboard");
   revalidatePath("/app/portfolios", "layout");
+  revalidatePath("/app/executive", "layout");
 }
 
 export async function patchTask(
