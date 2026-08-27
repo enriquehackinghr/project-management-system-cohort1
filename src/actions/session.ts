@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
   createAccount,
@@ -14,11 +15,18 @@ import { joinName } from "@/lib/names";
 import { dummyPasswordHash, hashPassword, verifyPassword } from "@/lib/password";
 import {
   loginSchema,
+  profileSchema,
   signupSchema,
   type LoginFormState,
+  type ProfileFormState,
   type SignupFormState,
 } from "@/lib/schemas";
-import { clearSessionCookie, safeNextPath, setSessionCookie } from "@/lib/session";
+import {
+  clearSessionCookie,
+  requireSession,
+  safeNextPath,
+  setSessionCookie,
+} from "@/lib/session";
 import type { Person } from "@/lib/types";
 
 async function establishSession(person: Person, nextPath: unknown) {
@@ -129,4 +137,42 @@ export async function logIn(
 export async function logOut() {
   await clearSessionCookie();
   redirect("/");
+}
+
+export async function updateAccount(
+  _state: ProfileFormState,
+  formData: FormData,
+): Promise<ProfileFormState> {
+  const values = {
+    firstName: String(formData.get("firstName") ?? ""),
+    lastName: String(formData.get("lastName") ?? ""),
+    email: String(formData.get("email") ?? ""),
+    industry: String(formData.get("industry") ?? ""),
+    country: String(formData.get("country") ?? ""),
+  };
+  const parsed = profileSchema.safeParse(values);
+  if (!parsed.success) {
+    return { errors: parsed.error.flatten().fieldErrors, values };
+  }
+
+  try {
+    const session = await requireSession();
+    const person = await updatePersonProfile(session.personId, parsed.data);
+    await setSessionCookie({
+      personId: person.id,
+      email: person.email,
+      firstName: person.first_name,
+      lastName: person.last_name,
+      fullName: person.full_name || joinName(person.first_name, person.last_name),
+    });
+    revalidatePath("/app", "layout");
+    return { saved: true, message: "Saved.", values };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Could not save your account.";
+    if (message.includes("already in use")) {
+      return { message, values, errors: { email: [message] } };
+    }
+    return { message: "Could not save your account. Try again.", values };
+  }
 }

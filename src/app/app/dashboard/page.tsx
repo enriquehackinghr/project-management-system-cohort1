@@ -12,7 +12,7 @@ export default async function PortfoliosPage() {
   return (
     <div>
       <PageHeader
-        kicker="Portfolio"
+        kicker="Portfolios"
         title="Your portfolios"
         description="Group projects together, or open a portfolio you were added to. Status changes write back to each project."
       />

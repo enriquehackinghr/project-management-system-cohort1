@@ -11,6 +11,7 @@ import { buildStatusSnapshot } from "@/lib/risk";
 import { statusDraftSchema } from "@/lib/schemas";
 import { requireSession } from "@/lib/session";
 import { parseAsOf } from "@/lib/dates";
+import { writeAuditEvent } from "@/lib/audit-store";
 
 export async function generateStatusDraft(projectId: string, asOfRaw?: string) {
   const session = await requireSession();
@@ -31,6 +32,13 @@ export async function generateStatusDraft(projectId: string, asOfRaw?: string) {
     "Write a weekly project status from the JSON snapshot only. Do not invent tasks. Body is editable prose: what moved, what slipped, what is next, what needs a decision. Be concise.",
   );
 
+  await writeAuditEvent({
+    actorId: session.personId,
+    kind: "change",
+    action: "status.generated",
+    summary: "Generated a weekly status draft",
+    projectId,
+  });
   return { snapshot, draft, asOf };
 }
 

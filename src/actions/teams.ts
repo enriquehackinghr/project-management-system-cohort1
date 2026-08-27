@@ -8,7 +8,9 @@ import {
   addPeopleToTeam,
   attachWorkToTeam,
   createTeam,
-  grantTeamAccess,
+  deleteTeam,
+  removePeopleFromTeam,
+  updateTeamName,
 } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 
@@ -37,15 +39,17 @@ function revalidateWork(projectIds: string[], portfolioIds: string[], teamId?: s
 export async function createTeamAction(formData: FormData) {
   const session = await requireSession();
   const name = String(formData.get("name") ?? "").trim();
-  const team = await createTeam(
-    session.personId,
-    name,
-    idsFrom(formData, "personId"),
-    idsFrom(formData, "projectId"),
-    idsFrom(formData, "portfolioId"),
-  );
+  const team = await createTeam(session.personId, name, idsFrom(formData, "personId"));
   revalidatePath("/app/teams");
   redirect(`/app/teams/${team.id}`);
+}
+
+export async function renameTeamAction(teamId: string, formData: FormData) {
+  const session = await requireSession();
+  const name = String(formData.get("name") ?? "").trim();
+  await updateTeamName(teamId, session.personId, name);
+  revalidatePath("/app/teams");
+  revalidatePath(`/app/teams/${teamId}`);
 }
 
 export async function addPeopleToTeamAction(teamId: string, formData: FormData) {
@@ -53,26 +57,35 @@ export async function addPeopleToTeamAction(teamId: string, formData: FormData) 
   await addPeopleToTeam(teamId, session.personId, idsFrom(formData, "personId"));
   revalidatePath("/app/teams");
   revalidatePath(`/app/teams/${teamId}`);
+  revalidatePath("/app/projects");
+  revalidatePath("/app/dashboard");
 }
 
-export async function attachWorkToTeamAction(teamId: string, formData: FormData) {
+export async function removeTeamMemberAction(teamId: string, personId: string) {
+  const session = await requireSession();
+  await removePeopleFromTeam(teamId, session.personId, [personId]);
+  revalidatePath("/app/teams");
+  revalidatePath(`/app/teams/${teamId}`);
+  revalidatePath("/app/projects");
+  revalidatePath("/app/dashboard");
+  revalidatePath("/app/executive", "layout");
+}
+
+export async function deleteTeamAction(teamId: string) {
+  const session = await requireSession();
+  await deleteTeam(teamId, session.personId);
+  revalidatePath("/app/teams");
+  revalidatePath("/app/projects");
+  revalidatePath("/app/dashboard");
+  revalidatePath("/app/executive", "layout");
+  redirect("/app/teams");
+}
+
+export async function addTeamToWorkAction(teamId: string, formData: FormData) {
   const session = await requireSession();
   const projectIds = idsFrom(formData, "projectId");
   const portfolioIds = idsFrom(formData, "portfolioId");
   await attachWorkToTeam(teamId, session.personId, projectIds, portfolioIds);
-  revalidatePath("/app/teams");
-  revalidatePath(`/app/teams/${teamId}`);
-}
-
-export async function grantTeamAccessAction(teamId: string, formData: FormData) {
-  const session = await requireSession();
-  const projectIds = idsFrom(formData, "projectId");
-  const portfolioIds = idsFrom(formData, "portfolioId");
-  await grantTeamAccess(teamId, session.personId, {
-    memberIds: idsFrom(formData, "personId"),
-    projectIds,
-    portfolioIds,
-  });
   revalidateWork(projectIds, portfolioIds, teamId);
 }
 

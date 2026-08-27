@@ -19,6 +19,8 @@ import type {
   TeamBundle,
   TeamMember,
 } from "./types";
+import { TASK_STATUS_LABEL } from "./types";
+import { writeAuditEvent, listAuditEvents } from "./audit-store";
 import { joinName } from "./names";
 import { colorsForProjects, nextPortfolioColor } from "./portfolio-colors";
 
@@ -88,16 +90,32 @@ export async function updatePersonProfile(
     lastName: string;
     industry: string;
     country: string;
+    email?: string;
   },
 ) {
+  const patch: {
+    first_name: string;
+    last_name: string;
+    industry: string;
+    country: string;
+    email?: string;
+  } = {
+    first_name: input.firstName.trim(),
+    last_name: input.lastName.trim(),
+    industry: input.industry,
+    country: input.country,
+  };
+  if (input.email) {
+    const email = input.email.trim().toLowerCase();
+    const existing = await getPersonByEmail(email);
+    if (existing && existing.id !== personId) {
+      throw new Error("That email is already in use.");
+    }
+    patch.email = email;
+  }
   const { data, error } = await admin()
     .from("people")
-    .update({
-      first_name: input.firstName.trim(),
-      last_name: input.lastName.trim(),
-      industry: input.industry,
-      country: input.country,
-    })
+    .update(patch)
     .eq("id", personId)
     .select("*")
     .single();
@@ -440,13 +458,44 @@ export async function createManualProject(input: {
 
   const { data, error } = await admin().rpc("commit_project_plan", { payload });
   throwIfError(error);
-  return data as string;
+  const projectId = data as string;
+  await writeAuditEvent({
+    actorId: input.createdById,
+    kind: "change",
+    action: "project.created",
+    summary: `Created project "${input.name}"`,
+    projectId,
+  });
+  return projectId;
 }
 
 export async function commitPlan(payload: unknown) {
   const { data, error } = await admin().rpc("commit_project_plan", { payload });
   throwIfError(error);
-  return data as string;
+  const projectId = data as string;
+  const name =
+    payload &&
+    typeof payload === "object" &&
+    "project" in payload &&
+    payload.project &&
+    typeof payload.project === "object" &&
+    "name" in payload.project
+      ? String(payload.project.name)
+      : "a project";
+  const createdById =
+    payload && typeof payload === "object" && "created_by_id" in payload
+      ? String(payload.created_by_id)
+      : null;
+  if (createdById) {
+    await writeAuditEvent({
+      actorId: createdById,
+      kind: "change",
+      action: "project.created",
+      summary: `Created project "${name}"`,
+      projectId,
+    });
+  }
+  return projectId;
 }
 
 export async function addProjectMember(
@@ -469,6 +518,15 @@ export async function addProjectMember(
     capacityHoursPerWeek: member.capacityHoursPerWeek,
   });
   await grantProjectMembership(projectId, person.id, member.role ?? "Member");
+  await writeAuditEvent({
+    actorId: personId,
+    kind: "change",
+    action: "member.added",
+    summary: `Added ${person.full_name} to the project`,
+    projectId,
+    targetType: "person",
+    targetId: person.id,
+  });
   return person;
 }
 
@@ -519,7 +577,17 @@ export async function addTask(
     .select("*")
     .single();
   throwIfError(error);
-  return data as Task;
+  const task = data as Task;
+  await writeAuditEvent({
+    actorId: personId,
+    kind: "change",
+    action: "task.created",
+    summary: `Created task "${task.title}"`,
+    projectId,
+    targetType: "task",
+    targetId: task.id,
+  });
+  return task;
 }
 
 export async function updateProjectName(
@@ -535,6 +603,13 @@ export async function updateProjectName(
     .update({ name: trimmed })
     .eq("id", projectId);
   throwIfError(error);
+  await writeAuditEvent({
+    actorId: personId,
+    kind: "change",
+    action: "project.renamed",
+    summary: `Renamed the project to "${trimmed}"`,
+    projectId,
+  });
 }
 
 export async function updateTaskStatus(
@@ -544,12 +619,34 @@ export async function updateTaskStatus(
   status: Task["status"],
 ) {
   await assertProjectAccess(projectId, personId);
+  const current = await admin()
+    .from("tasks")
+    .select("title, status")
+    .eq("id", taskId)
+    .eq("project_id", projectId)
+    .maybeSingle();
   const { error } = await admin()
     .from("tasks")
     .update({ status })
     .eq("id", taskId)
     .eq("project_id", projectId);
   throwIfError(error);
+  const title = current.data?.title ?? "a task";
+  const from = current.data?.status
+    ? TASK_STATUS_LABEL[current.data.status as Task["status"]]
+    : null;
+  await writeAuditEvent({
+    actorId: personId,
+    kind: "change",
+    action: "task.status",
+    summary: from
+      ? `Moved "${title}" from ${from} to ${TASK_STATUS_LABEL[status]}`
+      : `Moved "${title}" to ${TASK_STATUS_LABEL[status]}`,
+    projectId,
+    targetType: "task",
+    targetId: taskId,
+    metadata: { status },
+  });
 }
 
 export async function updateTask(
@@ -568,12 +665,42 @@ export async function updateTask(
   }>,
 ) {
   await assertProjectAccess(projectId, personId);
+  const current = await admin()
+    .from("tasks")
+    .select("title, status, owner_id")
+    .eq("id", taskId)
+    .eq("project_id", projectId)
+    .maybeSingle();
   const { error } = await admin()
     .from("tasks")
     .update(patch)
     .eq("id", taskId)
     .eq("project_id", projectId);
   throwIfError(error);
+  const title = patch.title?.trim() || current.data?.title || "a task";
+  let summary = `Updated "${title}"`;
+  if (patch.status) {
+    summary = `Moved "${title}" to ${TASK_STATUS_LABEL[patch.status]}`;
+  } else if (patch.owner_id !== undefined) {
+    const owner = patch.owner_id ? await getPersonById(patch.owner_id) : null;
+    summary = owner
+      ? `Assigned "${title}" to ${owner.full_name}`
+      : `Unassigned "${title}"`;
+  } else if (patch.due_date !== undefined || patch.start_date !== undefined) {
+    summary = `Rescheduled "${title}"`;
+  } else if (patch.title) {
+    summary = `Renamed a task to "${title}"`;
+  }
+  await writeAuditEvent({
+    actorId: personId,
+    kind: "change",
+    action: "task.updated",
+    summary,
+    projectId,
+    targetType: "task",
+    targetId: taskId,
+    metadata: patch,
+  });
 }
 
 export async function addPhase(
@@ -601,7 +728,17 @@ export async function addPhase(
     .select("*")
     .single();
   throwIfError(error);
-  return data as Phase;
+  const phase = data as Phase;
+  await writeAuditEvent({
+    actorId: personId,
+    kind: "change",
+    action: "phase.created",
+    summary: `Added phase "${phase.name}"`,
+    projectId,
+    targetType: "phase",
+    targetId: phase.id,
+  });
+  return phase;
 }
 
 export async function saveStatusReport(input: {
@@ -625,6 +762,13 @@ export async function saveStatusReport(input: {
     .select("*")
     .single();
   throwIfError(error);
+  await writeAuditEvent({
+    actorId: input.personId,
+    kind: "change",
+    action: "status.saved",
+    summary: `Saved a weekly status update`,
+    projectId: input.projectId,
+  });
   return data as StatusReport;
 }
 
@@ -791,6 +935,13 @@ export async function createPortfolio(personId: string, name: string) {
   throwIfError(error);
   const portfolio = data as Portfolio;
   await grantPortfolioMembership(portfolio.id, personId, "Owner");
+  await writeAuditEvent({
+    actorId: personId,
+    kind: "change",
+    action: "portfolio.created",
+    summary: `Created portfolio "${portfolio.name}"`,
+    portfolioId: portfolio.id,
+  });
   return portfolio;
 }
 
@@ -807,6 +958,13 @@ export async function updatePortfolioName(
     .update({ name: trimmed })
     .eq("id", portfolioId);
   throwIfError(error);
+  await writeAuditEvent({
+    actorId: personId,
+    kind: "change",
+    action: "portfolio.renamed",
+    summary: `Renamed the portfolio to "${trimmed}"`,
+    portfolioId,
+  });
 }
 
 export async function addProjectToPortfolio(
@@ -828,6 +986,21 @@ export async function addProjectToPortfolio(
   });
   throwIfError(error);
   await grantPortfolioProjectsToMembers(portfolioId, [projectId]);
+  const project = await admin()
+    .from("projects")
+    .select("name")
+    .eq("id", projectId)
+    .maybeSingle();
+  await writeAuditEvent({
+    actorId: personId,
+    kind: "change",
+    action: "portfolio.project_added",
+    summary: `Added ${project.data?.name ?? "a project"} to the portfolio`,
+    portfolioId,
+    projectId,
+    targetType: "project",
+    targetId: projectId,
+  });
 }
 
 export async function removeProjectFromPortfolio(
@@ -836,12 +1009,27 @@ export async function removeProjectFromPortfolio(
   projectId: string,
 ) {
   await assertPortfolioOwner(portfolioId, personId);
+  const project = await admin()
+    .from("projects")
+    .select("name")
+    .eq("id", projectId)
+    .maybeSingle();
   const { error } = await admin()
     .from("portfolio_projects")
     .delete()
     .eq("portfolio_id", portfolioId)
     .eq("project_id", projectId);
   throwIfError(error);
+  await writeAuditEvent({
+    actorId: personId,
+    kind: "change",
+    action: "portfolio.project_removed",
+    summary: `Removed ${project.data?.name ?? "a project"} from the portfolio`,
+    portfolioId,
+    projectId,
+    targetType: "project",
+    targetId: projectId,
+  });
 }
 
 export async function grantPortfolioMembership(
@@ -890,6 +1078,16 @@ export async function addPeopleToPortfolio(
   await assertPeopleOnOwnedTeams(actorId, unique);
   for (const memberId of unique) {
     await grantPortfolioMembership(portfolioId, memberId, "Member");
+    const person = await getPersonById(memberId);
+    await writeAuditEvent({
+      actorId,
+      kind: "change",
+      action: "member.added",
+      summary: `Added ${person?.full_name ?? "a teammate"} to the portfolio`,
+      portfolioId,
+      targetType: "person",
+      targetId: memberId,
+    });
   }
   await grantPortfolioProjectsToMembers(portfolioId);
 }
@@ -904,6 +1102,16 @@ export async function addPeopleToProject(
   await assertPeopleOnOwnedTeams(actorId, unique);
   for (const memberId of unique) {
     await grantProjectMembership(projectId, memberId, "Member");
+    const person = await getPersonById(memberId);
+    await writeAuditEvent({
+      actorId,
+      kind: "change",
+      action: "member.added",
+      summary: `Added ${person?.full_name ?? "a teammate"} to the project`,
+      projectId,
+      targetType: "person",
+      targetId: memberId,
+    });
   }
 }
 
@@ -986,6 +1194,7 @@ export async function getOwnedTeamBundle(
 ): Promise<TeamBundle | null> {
   try {
     const team = await assertTeamOwner(teamId, personId);
+    await grantAttachedWorkToMembers(teamId);
     const [members, teamProjects, teamPortfolios] = await Promise.all([
       listTeamMembers([teamId]),
       listTeamProjects([teamId]),
@@ -1063,12 +1272,208 @@ async function assertAccountPeople(memberIds: string[]) {
   }
 }
 
+async function grantAttachedWorkToMembers(teamId: string, memberIds?: string[]) {
+  const [members, teamProjects, teamPortfolios] = await Promise.all([
+    listTeamMembers([teamId]),
+    listTeamProjects([teamId]),
+    listTeamPortfolios([teamId]),
+  ]);
+  const onTeam = new Set(members.map((member) => member.person_id));
+  const people = uniqueIds(memberIds ?? [...onTeam]).filter((id) => onTeam.has(id));
+  if (people.length === 0) return;
+
+  const projectRows = teamProjects.flatMap((row) =>
+    people.map((personId) => ({
+      project_id: row.project.id,
+      person_id: personId,
+      role: "Member",
+    })),
+  );
+  if (projectRows.length > 0) {
+    const { error } = await admin()
+      .from("project_members")
+      .upsert(projectRows, {
+        onConflict: "project_id,person_id",
+        ignoreDuplicates: true,
+      });
+    throwIfError(error);
+  }
+
+  const portfolioRows = teamPortfolios.flatMap((row) =>
+    people.map((personId) => ({
+      portfolio_id: row.portfolio.id,
+      person_id: personId,
+      role: "Member",
+    })),
+  );
+  if (portfolioRows.length > 0) {
+    const { error } = await admin()
+      .from("portfolio_members")
+      .upsert(portfolioRows, {
+        onConflict: "portfolio_id,person_id",
+        ignoreDuplicates: true,
+      });
+    throwIfError(error);
+    for (const row of teamPortfolios) {
+      await grantPortfolioProjectsToMembers(row.portfolio.id);
+    }
+  }
+}
+
+async function workGrantedByTeams(teamIds: string[]) {
+  if (teamIds.length === 0) {
+    return { projectIds: [] as string[], portfolioIds: [] as string[] };
+  }
+  const [teamProjects, teamPortfolios] = await Promise.all([
+    listTeamProjects(teamIds),
+    listTeamPortfolios(teamIds),
+  ]);
+  const portfolioIds = uniqueIds(
+    teamPortfolios.map((row) => row.portfolio.id),
+  );
+  const items = await listPortfolioItems(portfolioIds);
+  return {
+    projectIds: uniqueIds([
+      ...teamProjects.map((row) => row.project.id),
+      ...items.map((item) => item.project_id),
+    ]),
+    portfolioIds,
+  };
+}
+
+async function otherTeamIdsForPerson(personId: string, exceptTeamId: string) {
+  const { data, error } = await admin()
+    .from("team_members")
+    .select("team_id")
+    .eq("person_id", personId)
+    .neq("team_id", exceptTeamId);
+  throwIfError(error);
+  return (data ?? []).map((row) => row.team_id as string);
+}
+
+async function revokeTeamWorkFromPeople(teamId: string, personIds: string[]) {
+  const unique = uniqueIds(personIds);
+  const revoked: Array<{
+    personId: string;
+    projectIds: string[];
+    portfolioIds: string[];
+  }> = [];
+  if (unique.length === 0) return revoked;
+
+  const leaving = await workGrantedByTeams([teamId]);
+  for (const personId of unique) {
+    const keep = await workGrantedByTeams(
+      await otherTeamIdsForPerson(personId, teamId),
+    );
+    const keepProjects = new Set(keep.projectIds);
+    const keepPortfolios = new Set(keep.portfolioIds);
+    const projectCandidates = leaving.projectIds.filter(
+      (id) => !keepProjects.has(id),
+    );
+    const portfolioCandidates = leaving.portfolioIds.filter(
+      (id) => !keepPortfolios.has(id),
+    );
+    const revokedProjectIds: string[] = [];
+    const revokedPortfolioIds: string[] = [];
+
+    if (projectCandidates.length > 0) {
+      const { data: projects, error } = await admin()
+        .from("projects")
+        .select("id, owner_id, created_by_id")
+        .in("id", projectCandidates);
+      throwIfError(error);
+      const revoke = (projects ?? [])
+        .filter(
+          (row) => row.owner_id !== personId && row.created_by_id !== personId,
+        )
+        .map((row) => row.id as string);
+      if (revoke.length > 0) {
+        const { error: deleteError } = await admin()
+          .from("project_members")
+          .delete()
+          .eq("person_id", personId)
+          .in("project_id", revoke);
+        throwIfError(deleteError);
+        revokedProjectIds.push(...revoke);
+      }
+    }
+
+    if (portfolioCandidates.length > 0) {
+      const { data: portfolios, error } = await admin()
+        .from("portfolios")
+        .select("id, created_by_id")
+        .in("id", portfolioCandidates);
+      throwIfError(error);
+      const revoke = (portfolios ?? [])
+        .filter((row) => row.created_by_id !== personId)
+        .map((row) => row.id as string);
+      if (revoke.length > 0) {
+        const { error: deleteError } = await admin()
+          .from("portfolio_members")
+          .delete()
+          .eq("person_id", personId)
+          .in("portfolio_id", revoke);
+        throwIfError(deleteError);
+        revokedPortfolioIds.push(...revoke);
+      }
+    }
+
+    if (revokedProjectIds.length > 0 || revokedPortfolioIds.length > 0) {
+      revoked.push({
+        personId,
+        projectIds: revokedProjectIds,
+        portfolioIds: revokedPortfolioIds,
+      });
+    }
+  }
+  return revoked;
+}
+
+async function writeRevokedAccessAudit(
+  actorId: string,
+  revoked: Array<{
+    personId: string;
+    projectIds: string[];
+    portfolioIds: string[];
+  }>,
+) {
+  for (const item of revoked) {
+    const person = await getPersonById(item.personId);
+    const name = person?.full_name ?? "a teammate";
+    for (const projectId of item.projectIds) {
+      await writeAuditEvent({
+        actorId,
+        kind: "change",
+        action: "member.removed",
+        summary: `Removed ${name} from the project`,
+        projectId,
+        targetType: "person",
+        targetId: item.personId,
+      });
+    }
+    for (const portfolioId of item.portfolioIds) {
+      await writeAuditEvent({
+        actorId,
+        kind: "change",
+        action: "member.removed",
+        summary: `Removed ${name} from the portfolio`,
+        portfolioId,
+        targetType: "person",
+        targetId: item.personId,
+      });
+    }
+  }
+}
+
+export async function syncOwnedTeamsAccess(personId: string) {
+  const teams = await listOwnedTeams(personId);
+  await Promise.all(teams.map((team) => grantAttachedWorkToMembers(team.id)));
+}
+
 export async function createTeam(
   personId: string,
   name: string,
   memberIds: string[],
-  projectIds: string[] = [],
-  portfolioIds: string[] = [],
 ) {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Team name is required.");
@@ -1088,10 +1493,22 @@ export async function createTeam(
   ];
   const { error: memberError } = await admin().from("team_members").insert(rows);
   throwIfError(memberError);
-  if (projectIds.length > 0 || portfolioIds.length > 0) {
-    await attachWorkToTeam(team.id, personId, projectIds, portfolioIds);
-  }
   return team;
+}
+
+export async function updateTeamName(
+  teamId: string,
+  actorId: string,
+  name: string,
+) {
+  await assertTeamOwner(teamId, actorId);
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Team name is required.");
+  const { error } = await admin()
+    .from("teams")
+    .update({ name: trimmed })
+    .eq("id", teamId);
+  throwIfError(error);
 }
 
 export async function addPeopleToTeam(
@@ -1110,6 +1527,76 @@ export async function addPeopleToTeam(
       { onConflict: "team_id,person_id", ignoreDuplicates: true },
     );
   throwIfError(error);
+  await grantAttachedWorkToMembers(teamId, unique);
+  const [teamProjects, teamPortfolios] = await Promise.all([
+    listTeamProjects([teamId]),
+    listTeamPortfolios([teamId]),
+  ]);
+  for (const memberId of unique) {
+    const person = await getPersonById(memberId);
+    const name = person?.full_name ?? "a teammate";
+    for (const row of teamProjects) {
+      await writeAuditEvent({
+        actorId,
+        kind: "change",
+        action: "member.added",
+        summary: `Added ${name} to the project`,
+        projectId: row.project.id,
+        targetType: "person",
+        targetId: memberId,
+      });
+    }
+    for (const row of teamPortfolios) {
+      await writeAuditEvent({
+        actorId,
+        kind: "change",
+        action: "member.added",
+        summary: `Added ${name} to the portfolio`,
+        portfolioId: row.portfolio.id,
+        targetType: "person",
+        targetId: memberId,
+      });
+    }
+  }
+}
+
+export async function removePeopleFromTeam(
+  teamId: string,
+  actorId: string,
+  memberIds: string[],
+) {
+  const team = await assertTeamOwner(teamId, actorId);
+  const unique = uniqueIds(memberIds);
+  if (unique.some((id) => id === team.created_by_id)) {
+    throw new Error("You cannot remove the team owner.");
+  }
+  if (unique.length === 0) return;
+
+  const members = await listTeamMembers([teamId]);
+  const onTeam = new Set(members.map((member) => member.person_id));
+  const leaving = unique.filter((id) => onTeam.has(id));
+  if (leaving.length === 0) return;
+
+  const revoked = await revokeTeamWorkFromPeople(teamId, leaving);
+  const { error } = await admin()
+    .from("team_members")
+    .delete()
+    .eq("team_id", teamId)
+    .in("person_id", leaving);
+  throwIfError(error);
+  await writeRevokedAccessAudit(actorId, revoked);
+}
+
+export async function deleteTeam(teamId: string, actorId: string) {
+  await assertTeamOwner(teamId, actorId);
+  const members = await listTeamMembers([teamId]);
+  const revoked = await revokeTeamWorkFromPeople(
+    teamId,
+    members.map((member) => member.person_id),
+  );
+  await writeRevokedAccessAudit(actorId, revoked);
+  const { error } = await admin().from("teams").delete().eq("id", teamId);
+  throwIfError(error);
 }
 
 export async function attachWorkToTeam(
@@ -1121,7 +1608,9 @@ export async function attachWorkToTeam(
   await assertTeamOwner(teamId, actorId);
   const projects = uniqueIds(projectIds);
   const portfolios = uniqueIds(portfolioIds);
-  if (projects.length === 0 && portfolios.length === 0) return;
+  if (projects.length === 0 && portfolios.length === 0) {
+    throw new Error("Select a portfolio or a project.");
+  }
 
   const ownedProjectIds = new Set(
     (await listOwnedProjects(actorId)).map((project) => project.id),
@@ -1157,57 +1646,29 @@ export async function attachWorkToTeam(
       );
     throwIfError(error);
   }
-}
 
-export async function grantTeamAccess(
-  teamId: string,
-  actorId: string,
-  input: {
-    memberIds: string[];
-    projectIds: string[];
-    portfolioIds: string[];
-  },
-) {
-  await assertTeamOwner(teamId, actorId);
-  const memberIds = uniqueIds(input.memberIds);
-  const projectIds = uniqueIds(input.projectIds);
-  const portfolioIds = uniqueIds(input.portfolioIds);
-  if (memberIds.length === 0) {
-    throw new Error("Select at least one team member.");
+  await grantAttachedWorkToMembers(teamId);
+  const ownedProjects = await listOwnedProjects(actorId);
+  const ownedPortfolios = await listOwnedPortfolios(actorId);
+  for (const projectId of projects) {
+    const project = ownedProjects.find((item) => item.id === projectId);
+    await writeAuditEvent({
+      actorId,
+      kind: "change",
+      action: "access.granted",
+      summary: `Gave the team access to ${project?.name ?? "a project"}`,
+      projectId,
+    });
   }
-  if (projectIds.length === 0 && portfolioIds.length === 0) {
-    throw new Error("Select a project or a portfolio from this team.");
-  }
-
-  const members = await listTeamMembers([teamId]);
-  const onTeam = new Set(members.map((member) => member.person_id));
-  if (memberIds.some((id) => !onTeam.has(id))) {
-    throw new Error("You can only grant access to people on this team.");
-  }
-
-  const [teamProjects, teamPortfolios] = await Promise.all([
-    listTeamProjects([teamId]),
-    listTeamPortfolios([teamId]),
-  ]);
-  const teamProjectIds = new Set(teamProjects.map((row) => row.project.id));
-  const teamPortfolioIds = new Set(teamPortfolios.map((row) => row.portfolio.id));
-  if (projectIds.some((id) => !teamProjectIds.has(id))) {
-    throw new Error("Add that project to this team first.");
-  }
-  if (portfolioIds.some((id) => !teamPortfolioIds.has(id))) {
-    throw new Error("Add that portfolio to this team first.");
-  }
-
-  for (const projectId of projectIds) {
-    for (const memberId of memberIds) {
-      await grantProjectMembership(projectId, memberId, "Member");
-    }
-  }
-  for (const portfolioId of portfolioIds) {
-    for (const memberId of memberIds) {
-      await grantPortfolioMembership(portfolioId, memberId, "Member");
-    }
-    await grantPortfolioProjectsToMembers(portfolioId);
+  for (const portfolioId of portfolios) {
+    const portfolio = ownedPortfolios.find((item) => item.id === portfolioId);
+    await writeAuditEvent({
+      actorId,
+      kind: "change",
+      action: "access.granted",
+      summary: `Gave the team access to ${portfolio?.name ?? "a portfolio"}`,
+      portfolioId,
+    });
   }
 }
 
@@ -1245,4 +1706,21 @@ export async function listMembershipPairs(
       person_id: string;
     }>,
   };
+}
+
+export async function listProjectAuditEvents(projectId: string, personId: string) {
+  await assertProjectAccess(projectId, personId);
+  return listAuditEvents({ projectIds: [projectId] });
+}
+
+export async function listPortfolioAuditEvents(
+  portfolioId: string,
+  personId: string,
+) {
+  await assertPortfolioAccess(portfolioId, personId);
+  const items = await listPortfolioItems([portfolioId]);
+  return listAuditEvents({
+    portfolioIds: [portfolioId],
+    projectIds: items.map((item) => item.project_id),
+  });
 }
