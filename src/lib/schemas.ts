@@ -46,6 +46,20 @@ export const loginSchema = z.object({
   next: z.string().optional(),
 });
 
+export const profileSchema = z.object({
+  firstName: requiredName("first name"),
+  lastName: requiredName("last name"),
+  email: z.email({ message: "Enter a valid email." }).trim().toLowerCase(),
+  industry: z
+    .string()
+    .min(1, { message: "Select an industry." })
+    .refine(isIndustry, { message: "Select an industry from the list." }),
+  country: z
+    .string()
+    .min(1, { message: "Select a country." })
+    .refine(isCountry, { message: "Select a country from the list." }),
+});
+
 export type SignupFormState =
   | {
       errors?: {
@@ -79,6 +93,27 @@ export type LoginFormState =
       message?: string;
       values?: {
         email?: string;
+      };
+    }
+  | undefined;
+
+export type ProfileFormState =
+  | {
+      errors?: {
+        firstName?: string[];
+        lastName?: string[];
+        email?: string[];
+        industry?: string[];
+        country?: string[];
+      };
+      message?: string;
+      saved?: boolean;
+      values?: {
+        firstName?: string;
+        lastName?: string;
+        email?: string;
+        industry?: string;
+        country?: string;
       };
     }
   | undefined;

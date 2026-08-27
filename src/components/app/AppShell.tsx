@@ -5,8 +5,8 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { renamePortfolioAction } from "@/actions/portfolios";
 import { renameProjectAction } from "@/actions/projects";
-import { logOut } from "@/actions/session";
 import type { SessionPerson } from "@/lib/types";
+import { AccountMenu } from "./AccountMenu";
 import { EditableName } from "./EditableName";
 
 export function BaguetteIcon({
@@ -99,7 +99,7 @@ export function AppShell({
                   pathname.startsWith("/app/portfolios")
                 }
               >
-                Portfolio
+                Portfolios
               </NavItem>
               <NavItem
                 href="/app/executive"
@@ -109,20 +109,7 @@ export function AppShell({
               </NavItem>
             </nav>
           </div>
-          <div className="flex items-center gap-3">
-            <p className="hidden text-sm text-mute sm:block">{person.firstName}</p>
-            <form action={logOut}>
-              <button
-                type="submit"
-                className="text-sm font-medium text-mute hover:text-ink"
-              >
-                Log out
-              </button>
-            </form>
-            <Link href="/" className="text-sm font-medium text-mute hover:text-ink">
-              Home
-            </Link>
-          </div>
+          <AccountMenu person={person} />
         </div>
       </header>
       {projectWorkspace ? (
@@ -162,6 +149,7 @@ const PROJECT_LINKS = [
   ["Dashboard", "/dashboard"],
   ["Risks", "/risks"],
   ["Status", "/status"],
+  ["Audit Log", "/audit"],
 ] as const;
 
 export function ProjectNav({
@@ -222,6 +210,7 @@ const PORTFOLIO_LINKS = [
   ["Overview", ""],
   ["Board", "/board"],
   ["Timeline", "/timeline"],
+  ["Audit Log", "/audit"],
 ] as const;
 
 const EXECUTIVE_LINKS = [

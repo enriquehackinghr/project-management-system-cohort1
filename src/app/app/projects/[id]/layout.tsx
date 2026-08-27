@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { ProjectNav } from "@/components/app/AppShell";
 import { ProjectAssistant } from "@/components/app/Assistant";
+import { AuditTracker } from "@/components/app/AuditTracker";
 import { getAccessibleProject } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 
@@ -18,7 +19,7 @@ export default async function ProjectLayout({
   if (!bundle) notFound();
 
   return (
-    <>
+    <AuditTracker scope="project" projectId={id}>
       <div className="flex min-h-[calc(100dvh-4rem)]">
         <ProjectNav
           projectId={id}
@@ -33,6 +34,6 @@ export default async function ProjectLayout({
         </main>
       </div>
       <ProjectAssistant projectId={id} projectName={bundle.project.name} />
-    </>
+    </AuditTracker>
   );
 }

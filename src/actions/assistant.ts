@@ -18,6 +18,7 @@ import {
   type ProposedAction,
 } from "@/lib/schemas";
 import { requireSession } from "@/lib/session";
+import { writeAuditEvent } from "@/lib/audit-store";
 import type { ProjectBundle, TaskStatus } from "@/lib/types";
 
 function compactProject(bundle: ProjectBundle) {
@@ -130,8 +131,7 @@ export async function askAssistant(
 ) {
   const session = await requireSession();
   const bundle = await getProjectBundle(projectId, session.personId);
-
-  return completeJson(
+  const result = await completeJson(
     assistantSchema,
     "project_assistant",
     [
@@ -141,6 +141,14 @@ export async function askAssistant(
     ],
     "You are the Baguette project assistant. Answer only from the provided project JSON. You may propose create_task, reassign_task, reschedule_task, or update_status. Leave project_id null. Never claim a write happened. Proposed actions wait for explicit user confirmation. Use only member emails and task ids from the JSON. If you cannot do something from the data, say so.",
   );
+  await writeAuditEvent({
+    actorId: session.personId,
+    kind: "change",
+    action: "assistant.asked",
+    summary: "Asked the project assistant",
+    projectId,
+  });
+  return result;
 }
 
 export async function askPortfolioAssistant(
@@ -219,7 +227,7 @@ export async function askPortfolioAssistant(
       : [],
   };
 
-  return completeJson(
+  const result = await completeJson(
     assistantSchema,
     "portfolio_assistant",
     [
@@ -229,6 +237,14 @@ export async function askPortfolioAssistant(
     ],
     "You are the Baguette portfolio assistant. Answer only from the provided portfolio JSON. If can_manage is true, you may propose rename_portfolio (set name), add_project (project_id from available_projects_to_add), or remove_project (project_id from projects). Otherwise do not propose those. You may also propose create_task, reassign_task, reschedule_task, or update_status for a specific project in this portfolio — always set project_id, and use only that project's member emails, task ids, and phase ids. Never claim a write happened. Proposed actions wait for explicit user confirmation. Include the project name in each project-level action summary. If you cannot do something from the data, say so.",
   );
+  await writeAuditEvent({
+    actorId: session.personId,
+    kind: "change",
+    action: "assistant.asked",
+    summary: "Asked the portfolio assistant",
+    portfolioId,
+  });
+  return result;
 }
 
 export async function confirmAssistantAction(

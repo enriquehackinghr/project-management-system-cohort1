@@ -158,6 +158,30 @@ export type TeamBundle = {
   portfolios: Portfolio[];
 };
 
+export type AuditKind = "change" | "view" | "click";
+
+export type AuditEvent = {
+  id: string;
+  scope: "project" | "portfolio";
+  project_id: string | null;
+  portfolio_id: string | null;
+  actor_id: string;
+  kind: AuditKind;
+  action: string;
+  summary: string;
+  target_type: string | null;
+  target_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  actor: Person;
+};
+
+export const AUDIT_KIND_LABEL: Record<AuditKind, string> = {
+  change: "Change",
+  view: "View",
+  click: "Click",
+};
+
 export type AccountBundle = {
   projects: Project[];
   colors: Record<string, string>;

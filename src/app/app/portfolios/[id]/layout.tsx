@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
 import { PortfolioNav } from "@/components/app/AppShell";
 import { PortfolioAssistant } from "@/components/app/Assistant";
+import { AuditTracker } from "@/components/app/AuditTracker";
 import { getAccessiblePortfolio } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 
@@ -18,7 +19,7 @@ export default async function PortfolioLayout({
   if (!bundle) notFound();
 
   return (
-    <>
+    <AuditTracker scope="portfolio" portfolioId={id}>
       <div className="flex min-h-[calc(100dvh-4rem)]">
         <PortfolioNav
           portfolioId={id}
@@ -33,6 +34,6 @@ export default async function PortfolioLayout({
         portfolioId={id}
         portfolioName={bundle.portfolio.name}
       />
-    </>
+    </AuditTracker>
   );
 }

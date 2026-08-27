@@ -1,24 +1,22 @@
 import Link from "next/link";
-import { CreateTeamForm } from "@/components/app/TeamForms";
-import { Card, EmptyState, PageHeader, Pill } from "@/components/app/ui";
+import { CreateTeamModal } from "@/components/app/TeamForms";
+import { EmptyState, PageHeader, Pill } from "@/components/app/ui";
 import {
   listAccountPeople,
-  listOwnedPortfolios,
-  listOwnedProjects,
   listOwnedTeams,
   listTeamMembers,
   listTeamPortfolios,
   listTeamProjects,
+  syncOwnedTeamsAccess,
 } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 
 export default async function TeamsPage() {
   const session = await requireSession();
-  const [teams, people, projects, portfolios] = await Promise.all([
+  await syncOwnedTeamsAccess(session.personId);
+  const [teams, people] = await Promise.all([
     listOwnedTeams(session.personId),
     listAccountPeople(session.personId),
-    listOwnedProjects(session.personId),
-    listOwnedPortfolios(session.personId),
   ]);
   const teamIds = teams.map((team) => team.id);
   const [members, teamProjects, teamPortfolios] = await Promise.all([
@@ -32,16 +30,13 @@ export default async function TeamsPage() {
       <PageHeader
         kicker="Teams"
         title="Your teams"
-        description="Create as many teams as you need. Each has its own name, members, and work. The same person can sit on more than one team."
+        description="Create a team, add people, then give them a portfolio or a project. The same person can sit on more than one team."
+        actions={<CreateTeamModal people={people} />}
       />
-      <Card className="mb-8">
-        <p className="mb-3 text-sm font-medium">New team</p>
-        <CreateTeamForm people={people} projects={projects} portfolios={portfolios} />
-      </Card>
       {teams.length === 0 ? (
         <EmptyState
           title="No teams yet"
-          body="Name a team, add people from the platform, and attach the projects or portfolios that belong to it."
+          body="Create a team, add people who already have an account, then give them a portfolio or a project. They will see that work the next time they log in."
         />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
@@ -90,7 +85,9 @@ export default async function TeamsPage() {
                     </span>
                   ))}
                   {attachedProjects.length === 0 && attachedPortfolios.length === 0 ? (
-                    <p className="text-[12px] text-mute">No projects or portfolios yet.</p>
+                    <p className="text-[12px] text-mute">
+                      No portfolio or project yet.
+                    </p>
                   ) : null}
                 </div>
               </Link>
