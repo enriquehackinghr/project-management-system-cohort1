@@ -334,7 +334,9 @@ function TaskRow({ task, showProject }: { task: RadarTask; showProject: boolean 
               <span aria-hidden="true">·</span>
             </>
           ) : null}
-          <span>{task.ownerName ?? "Unassigned"}</span>
+          <span>
+            {task.ownerNames.length > 0 ? task.ownerNames.join(", ") : "Unassigned"}
+          </span>
           <span aria-hidden="true">·</span>
           <span>{task.dueDate ? formatDate(task.dueDate) : "No due date"}</span>
         </p>

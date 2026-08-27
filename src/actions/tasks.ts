@@ -1,7 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { addPhase, addTask, updateTask, updateTaskStatus } from "@/lib/db";
+import {
+  addPhase,
+  addTask,
+  setTaskAssignees,
+  updateTask,
+  updateTaskStatus,
+} from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import type { TaskPriority, TaskStatus } from "@/lib/types";
 
@@ -14,7 +20,10 @@ export async function createTask(projectId: string, formData: FormData) {
     title,
     description: String(formData.get("description") ?? "").trim(),
     phaseId: String(formData.get("phaseId") ?? "") || null,
-    ownerId: String(formData.get("ownerId") ?? "") || null,
+    assigneeIds: formData
+      .getAll("assigneeIds")
+      .map((value) => String(value))
+      .filter(Boolean),
     status: (String(formData.get("status") ?? "todo") as TaskStatus) || "todo",
     priority: (String(formData.get("priority") ?? "medium") as TaskPriority) || "medium",
     estimateHours: Number(formData.get("estimateHours") || 0) || null,
@@ -36,6 +45,14 @@ export async function createPhase(projectId: string, formData: FormData) {
   revalidatePath(`/app/projects/${projectId}`);
 }
 
+/** The same task shows up on project, portfolio, and account views of the board. */
+function revalidateTaskViews(projectId: string) {
+  revalidatePath(`/app/projects/${projectId}`, "layout");
+  revalidatePath("/app/dashboard");
+  revalidatePath("/app/portfolios", "layout");
+  revalidatePath("/app/executive", "layout");
+}
+
 export async function moveTask(
   projectId: string,
   taskId: string,
@@ -43,11 +60,17 @@ export async function moveTask(
 ) {
   const session = await requireSession();
   await updateTaskStatus(projectId, session.personId, taskId, status);
-  revalidatePath(`/app/projects/${projectId}`);
-  revalidatePath(`/app/projects/${projectId}/board`);
-  revalidatePath("/app/dashboard");
-  revalidatePath("/app/portfolios", "layout");
-  revalidatePath("/app/executive", "layout");
+  revalidateTaskViews(projectId);
+}
+
+export async function assignTask(
+  projectId: string,
+  taskId: string,
+  assigneeIds: string[],
+) {
+  const session = await requireSession();
+  await setTaskAssignees(projectId, session.personId, taskId, assigneeIds);
+  revalidateTaskViews(projectId);
 }
 
 export async function patchTask(

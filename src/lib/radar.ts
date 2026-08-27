@@ -11,10 +11,18 @@ import {
   RISK_KIND_LABEL,
   detectRisks,
   elapsedPercent,
+  groupAssignees,
   type RiskFinding,
   type RiskKind,
 } from "./risk";
-import type { Person, Phase, Project, Task, TaskDependency } from "./types";
+import type {
+  Person,
+  Phase,
+  Project,
+  Task,
+  TaskAssignee,
+  TaskDependency,
+} from "./types";
 
 export type RadarScope =
   | { kind: "project"; id: string }
@@ -37,8 +45,9 @@ export type RadarTask = {
   projectId: string;
   projectName: string;
   projectColor: string | null;
+  /** The primary assignee. ownerNames lists everyone responsible. */
   ownerId: string | null;
-  ownerName: string | null;
+  ownerNames: string[];
   dueDate: string | null;
   estimateHours: number;
   daysOut: number | null;
@@ -143,6 +152,7 @@ type ScopeData = {
   tasks: Task[];
   phases: Phase[];
   people: Person[];
+  assignees: TaskAssignee[];
   dependencies: TaskDependency[];
   colors: Record<string, string>;
 };
@@ -186,6 +196,9 @@ export async function buildRadarSnapshot(input: {
   const { asOf } = input;
   const peopleById = new Map(data.people.map((person) => [person.id, person]));
   const projectById = new Map(data.projects.map((project) => [project.id, project]));
+  const assigneesByTask = groupAssignees(data.assignees);
+  const isAssigned = (taskId: string, personId: string) =>
+    (assigneesByTask.get(taskId) ?? []).includes(personId);
 
   // Detection always runs against the full set so a view filter cannot hide a rule.
   const allFindings = detectRisks({
@@ -194,6 +207,7 @@ export async function buildRadarSnapshot(input: {
     tasks: data.tasks,
     phases: data.phases,
     people: data.people,
+    assignees: data.assignees,
     dependencies: data.dependencies,
   });
 
@@ -202,13 +216,13 @@ export async function buildRadarSnapshot(input: {
   const ownedTaskIds = ownerFilterId
     ? new Set(
         data.tasks
-          .filter((task) => task.owner_id === ownerFilterId)
+          .filter((task) => isAssigned(task.id, ownerFilterId))
           .map((task) => task.id),
       )
     : null;
 
   const tasks = ownerFilterId
-    ? data.tasks.filter((task) => task.owner_id === ownerFilterId)
+    ? data.tasks.filter((task) => isAssigned(task.id, ownerFilterId))
     : data.tasks;
   const findings = ownerFilterId
     ? allFindings.filter(
@@ -220,7 +234,9 @@ export async function buildRadarSnapshot(input: {
 
   const toRadarTask = (task: Task): RadarTask => {
     const project = projectById.get(task.project_id);
-    const owner = task.owner_id ? peopleById.get(task.owner_id) : undefined;
+    const ownerNames = (assigneesByTask.get(task.id) ?? [])
+      .map((personId) => peopleById.get(personId)?.full_name)
+      .filter((name): name is string => Boolean(name));
     return {
       id: task.id,
       title: task.title,
@@ -230,7 +246,7 @@ export async function buildRadarSnapshot(input: {
       projectName: project?.name ?? "Unknown project",
       projectColor: data.colors[task.project_id] ?? null,
       ownerId: task.owner_id,
-      ownerName: owner?.full_name ?? null,
+      ownerNames,
       dueDate: task.due_date,
       estimateHours: Number(task.estimate_hours ?? 0),
       daysOut: task.due_date ? daysBetween(asOf, task.due_date) : null,
@@ -260,7 +276,13 @@ export async function buildRadarSnapshot(input: {
     ),
   };
 
-  const people = buildPeople(data.people, data.tasks, asOf, dueSoonCutoff);
+  const people = buildPeople(
+    data.people,
+    data.tasks,
+    assigneesByTask,
+    asOf,
+    dueSoonCutoff,
+  );
   const projects = buildProjects(data, allFindings, asOf, dueSoonCutoff);
   const overCapacityCount = people.filter((person) => person.overCapacity).length;
 
@@ -312,6 +334,7 @@ async function loadScope(
         ...(bundle.owner ? [bundle.owner] : []),
         ...bundle.members.map((member) => member.person),
       ]),
+      assignees: bundle.assignees,
       dependencies: bundle.dependencies,
       colors: {},
     };
@@ -332,6 +355,7 @@ async function loadScope(
         ...bundle.people,
         ...bundle.members.map((member) => member.person),
       ]),
+      assignees: bundle.assignees,
       dependencies: bundle.dependencies,
       colors,
     };
@@ -345,6 +369,7 @@ async function loadScope(
     tasks: bundle.tasks,
     phases: bundle.phases,
     people: bundle.people,
+    assignees: bundle.assignees,
     dependencies: bundle.dependencies,
     colors: bundle.colors,
   };
@@ -384,11 +409,14 @@ function horizonFor(task: Task, asOf: string): RadarHorizonKey {
 function buildPeople(
   people: Person[],
   tasks: Task[],
+  assigneesByTask: Map<string, string[]>,
   asOf: string,
   dueSoonCutoff: string,
 ): RadarPerson[] {
   const rows = people.map((person) => {
-    const owned = tasks.filter((task) => task.owner_id === person.id);
+    const owned = tasks.filter((task) =>
+      (assigneesByTask.get(task.id) ?? []).includes(person.id),
+    );
     const open = owned.filter((task) => task.status !== "done");
     const openHours = round1(
       open.reduce((sum, task) => sum + Number(task.estimate_hours ?? 0), 0),

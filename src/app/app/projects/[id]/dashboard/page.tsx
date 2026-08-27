@@ -29,6 +29,7 @@ export default async function ProjectDashboardPage({
     tasks: bundle.tasks,
     phases: bundle.phases,
     people,
+    assignees: bundle.assignees,
     dependencies: bundle.dependencies,
   });
   return (
@@ -47,7 +48,12 @@ export default async function ProjectDashboardPage({
       />
       <section>
         <h2 className="mb-3 text-lg font-semibold">Team load</h2>
-        <TeamDashboard asOf={asOf} tasks={bundle.tasks} people={people} />
+        <TeamDashboard
+          asOf={asOf}
+          tasks={bundle.tasks}
+          people={people}
+          assignees={bundle.assignees}
+        />
       </section>
     </div>
   );

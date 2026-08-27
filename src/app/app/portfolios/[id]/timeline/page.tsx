@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { Timeline } from "@/components/app/Timeline";
-import { getAccessiblePortfolio } from "@/lib/db";
+import { getAccessiblePortfolio, getPortfolioAccessRole } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 
 export default async function PortfolioTimelinePage({
@@ -34,6 +34,10 @@ export default async function PortfolioTimelinePage({
         name: item.project.name,
         color: item.color,
       }))}
+      people={bundle.people}
+      assignees={bundle.assignees}
+      membersByProject={bundle.membersByProject}
+      canEdit={(await getPortfolioAccessRole(id, session.personId)) === "admin"}
     />
   );
 }

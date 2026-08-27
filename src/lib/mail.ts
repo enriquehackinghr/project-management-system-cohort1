@@ -6,6 +6,9 @@ import {
   membershipInviteHtml,
   membershipInviteSubject,
   membershipInviteText,
+  passwordResetHtml,
+  passwordResetSubject,
+  passwordResetText,
   roleChangedHtml,
   roleChangedSubject,
   roleChangedText,
@@ -19,6 +22,13 @@ export type AddedToWorkEmail = {
   workKind: "project" | "portfolio";
   workName: string;
   workId: string;
+};
+
+export type PasswordResetEmail = {
+  to: string;
+  recipientFirstName: string;
+  token: string;
+  expiresInMinutes: number;
 };
 
 export type RoleChangedEmail = {
@@ -38,6 +48,10 @@ function workPath(kind: "project" | "portfolio", id: string) {
   return kind === "portfolio"
     ? `/app/portfolios/${workId}`
     : `/app/projects/${workId}`;
+}
+
+export function passwordResetUrl(token: string) {
+  return `${getAppUrl()}/reset-password?token=${encodeURIComponent(token)}`;
 }
 
 export function membershipLinks(kind: "project" | "portfolio", id: string) {
@@ -97,6 +111,20 @@ export async function sendAddedToWorkEmail(input: AddedToWorkEmail) {
     subject: membershipInviteSubject(content),
     html: membershipInviteHtml(content),
     text: membershipInviteText(content),
+  });
+}
+
+export async function sendPasswordResetEmail(input: PasswordResetEmail) {
+  const content = {
+    recipientFirstName: input.recipientFirstName,
+    resetUrl: passwordResetUrl(input.token),
+    expiresInMinutes: input.expiresInMinutes,
+  };
+
+  return send("Password reset", input.to, {
+    subject: passwordResetSubject(),
+    html: passwordResetHtml(content),
+    text: passwordResetText(content),
   });
 }
 

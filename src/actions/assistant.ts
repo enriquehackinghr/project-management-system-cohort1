@@ -11,6 +11,7 @@ import {
   listMembersForProjects,
   listProjectsForPerson,
   removeProjectFromPortfolio,
+  setTaskAssignees,
   updatePortfolioName,
   updateTask,
 } from "@/lib/db";
@@ -21,9 +22,25 @@ import {
 } from "@/lib/schemas";
 import { requireSession } from "@/lib/session";
 import { writeAuditEvent } from "@/lib/audit-store";
-import type { ProjectBundle, TaskStatus } from "@/lib/types";
+import type { Person, ProjectBundle, TaskAssignee, TaskStatus } from "@/lib/types";
+
+/** Emails, keyed by task, so the model can name people the same way it assigns them. */
+function assigneeEmailsByTask(assignees: TaskAssignee[], people: Person[]) {
+  const emailById = new Map(people.map((person) => [person.id, person.email]));
+  const byTask = new Map<string, string[]>();
+  for (const row of assignees) {
+    const email = emailById.get(row.person_id);
+    if (!email) continue;
+    byTask.set(row.task_id, [...(byTask.get(row.task_id) ?? []), email]);
+  }
+  return byTask;
+}
 
 function compactProject(bundle: ProjectBundle, canEdit: boolean) {
+  const emailsByTask = assigneeEmailsByTask(
+    bundle.assignees,
+    bundle.members.map((member) => member.person),
+  );
   return {
     id: bundle.project.id,
     can_edit: canEdit,
@@ -43,7 +60,7 @@ function compactProject(bundle: ProjectBundle, canEdit: boolean) {
       id: task.id,
       title: task.title,
       status: task.status,
-      owner_id: task.owner_id,
+      assignee_emails: emailsByTask.get(task.id) ?? [],
       start_date: task.start_date,
       due_date: task.due_date,
       estimate_hours: task.estimate_hours,
@@ -71,18 +88,25 @@ async function applyProjectAction(
   const bundle = await getProjectBundle(projectId, personId);
   const members = bundle.members.map((member) => member.person);
 
+  const resolveAssignees = (emails: string[]) =>
+    emails.flatMap((raw) => {
+      const email = raw.trim().toLowerCase();
+      if (!email) return [];
+      const person = members.find((member) => member.email === email);
+      if (!person) {
+        throw new Error(`${raw} is not a member of this project.`);
+      }
+      return [person.id];
+    });
+
   if (action.type === "create_task") {
-    const owner = members.find(
-      (person) =>
-        person.email === action.owner_email?.trim().toLowerCase(),
-    );
     if (action.phase_id) {
       const phaseOk = bundle.phases.some((phase) => phase.id === action.phase_id);
       if (!phaseOk) throw new Error("That phase is not on this project.");
     }
     await addTask(projectId, personId, {
       title: action.title || action.summary,
-      ownerId: owner?.id ?? null,
+      assigneeIds: resolveAssignees(action.assignee_emails),
       status: action.status ?? "todo",
       estimateHours: action.estimate_hours,
       startDate: action.start_date,
@@ -105,14 +129,12 @@ async function applyProjectAction(
   if (!exists) throw new Error("That task is not on this project.");
 
   if (action.type === "reassign_task") {
-    const owner = members.find(
-      (person) =>
-        person.email === action.owner_email?.trim().toLowerCase(),
+    await setTaskAssignees(
+      projectId,
+      personId,
+      action.task_id,
+      resolveAssignees(action.assignee_emails),
     );
-    if (!owner) throw new Error("Owner must already be a project member.");
-    await updateTask(projectId, personId, action.task_id, {
-      owner_id: owner.id,
-    });
   }
   if (action.type === "reschedule_task") {
     await updateTask(projectId, personId, action.task_id, {
@@ -146,7 +168,7 @@ export async function askAssistant(
       ...history,
       { role: "user", content: userMessage },
     ],
-    "You are the Baguette project assistant. Answer only from the provided project JSON. If can_edit is true you may propose create_task, reassign_task, reschedule_task, or update_status; if can_edit is false propose nothing and explain that this person has view-only access. Leave project_id null. Never claim a write happened. Proposed actions wait for explicit user confirmation. Use only member emails and task ids from the JSON. If you cannot do something from the data, say so.",
+    "You are the Baguette project assistant. Answer only from the provided project JSON. If can_edit is true you may propose create_task, reassign_task, reschedule_task, or update_status; if can_edit is false propose nothing and explain that this person has view-only access. A task can have several people responsible for it: assignee_emails is always the complete list after the change, so to add somebody include the emails already on the task, and use an empty list to leave the task unassigned. Leave assignee_emails empty for actions that are not about assignment. Leave project_id null. Never claim a write happened. Proposed actions wait for explicit user confirmation. Use only member emails and task ids from the JSON. If you cannot do something from the data, say so.",
   );
   await writeAuditEvent({
     actorId: session.personId,
@@ -179,6 +201,7 @@ export async function askPortfolioAssistant(
     membersByProject.set(membership.project_id, list);
   }
 
+  const emailsByTask = assigneeEmailsByTask(bundle.assignees, bundle.people);
   const inPortfolio = new Set(projectIds);
   const canManage =
     (await getPortfolioAccessRole(portfolioId, session.personId)) === "admin";
@@ -215,7 +238,7 @@ export async function askPortfolioAssistant(
             id: task.id,
             title: task.title,
             status: task.status,
-            owner_id: task.owner_id,
+            assignee_emails: emailsByTask.get(task.id) ?? [],
             start_date: task.start_date,
             due_date: task.due_date,
             estimate_hours: task.estimate_hours,
@@ -243,7 +266,7 @@ export async function askPortfolioAssistant(
       ...history,
       { role: "user", content: userMessage },
     ],
-    "You are the Baguette portfolio assistant. Answer only from the provided portfolio JSON. If can_manage is true, you may propose rename_portfolio (set name), add_project (project_id from available_projects_to_add), or remove_project (project_id from projects). Otherwise do not propose those. You may also propose create_task, reassign_task, reschedule_task, or update_status for a specific project in this portfolio — always set project_id, and use only that project's member emails, task ids, and phase ids. Never claim a write happened. Proposed actions wait for explicit user confirmation. Include the project name in each project-level action summary. If you cannot do something from the data, say so.",
+    "You are the Baguette portfolio assistant. Answer only from the provided portfolio JSON. If can_manage is true, you may propose rename_portfolio (set name), add_project (project_id from available_projects_to_add), or remove_project (project_id from projects). Otherwise do not propose those. You may also propose create_task, reassign_task, reschedule_task, or update_status for a specific project in this portfolio — always set project_id, and use only that project's member emails, task ids, and phase ids. A task can have several people responsible for it: assignee_emails is always the complete list after the change, so to add somebody include the emails already on the task, and use an empty list to leave the task unassigned. Leave assignee_emails empty for actions that are not about assignment. Never claim a write happened. Proposed actions wait for explicit user confirmation. Include the project name in each project-level action summary. If you cannot do something from the data, say so.",
   );
   await writeAuditEvent({
     actorId: session.personId,

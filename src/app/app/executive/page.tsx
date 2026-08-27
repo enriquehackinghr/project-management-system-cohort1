@@ -98,7 +98,12 @@ export default async function ExecutiveOverviewPage() {
 
       <section>
         <h2 className="mb-3 text-lg font-semibold tracking-tight">Team load</h2>
-        <TeamDashboard asOf={asOf} tasks={bundle.tasks} people={bundle.people} />
+        <TeamDashboard
+          asOf={asOf}
+          tasks={bundle.tasks}
+          people={bundle.people}
+          assignees={bundle.assignees}
+        />
       </section>
     </div>
   );

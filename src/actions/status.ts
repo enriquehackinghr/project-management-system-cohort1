@@ -23,6 +23,7 @@ export async function generateStatusDraft(projectId: string, asOfRaw?: string) {
     project: bundle.project,
     tasks: bundle.tasks,
     people,
+    assignees: bundle.assignees,
   });
 
   const draft = await completeJson(

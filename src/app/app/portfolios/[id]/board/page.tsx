@@ -51,6 +51,8 @@ export default async function PortfolioBoardPage({
       <Board
         tasks={bundle.tasks}
         people={bundle.people}
+        assignees={bundle.assignees}
+        membersByProject={bundle.membersByProject}
         projectColors={projectColors}
         projectNames={projectNames}
         canEdit={(await getPortfolioAccessRole(id, session.personId)) === "admin"}

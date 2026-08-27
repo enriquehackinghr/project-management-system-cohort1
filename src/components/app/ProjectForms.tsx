@@ -1,6 +1,7 @@
 import { addMemberToProject } from "@/actions/projects";
 import { createPhase, createTask } from "@/actions/tasks";
 import type { Phase, Person } from "@/lib/types";
+import { PersonPicker } from "./PersonPicker";
 import { Field, inputClass, PrimaryButton, textareaClass } from "./ui";
 
 export function MemberForm({ projectId }: { projectId: string }) {
@@ -48,16 +49,6 @@ export function TaskForm({
       <Field label="Title">
         <input className={inputClass} name="title" required />
       </Field>
-      <Field label="Owner">
-        <select className={inputClass} name="ownerId" defaultValue="">
-          <option value="">Unassigned</option>
-          {people.map((person) => (
-            <option key={person.id} value={person.id}>
-              {person.full_name}
-            </option>
-          ))}
-        </select>
-      </Field>
       <Field label="Phase">
         <select className={inputClass} name="phaseId" defaultValue="">
           <option value="">None</option>
@@ -85,6 +76,15 @@ export function TaskForm({
         <Field label="Description">
           <textarea className={textareaClass} name="description" />
         </Field>
+      </div>
+      <div className="sm:col-span-2">
+        {/* Not a Field: CheckboxGroup renders its own labels and they cannot nest. */}
+        <p className="mb-1.5 text-[13px] font-medium text-mute">Assigned to</p>
+        <PersonPicker
+          people={people}
+          name="assigneeIds"
+          emptyLabel="Add members to this project before assigning work."
+        />
       </div>
       <input type="hidden" name="startDate" />
       <PrimaryButton type="submit">Add task</PrimaryButton>

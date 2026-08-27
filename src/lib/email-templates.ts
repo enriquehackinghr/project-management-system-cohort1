@@ -9,6 +9,12 @@ export type MembershipInviteContent = {
   loginUrl: string;
 };
 
+export type PasswordResetContent = {
+  recipientFirstName: string;
+  resetUrl: string;
+  expiresInMinutes: number;
+};
+
 export type RoleChangedContent = {
   recipientFirstName: string;
   actorName: string;
@@ -144,6 +150,141 @@ export function membershipInviteHtml(input: MembershipInviteContent) {
                 </p>
                 <p style="margin:8px 0 0;font-family:Poppins,Arial,Helvetica,sans-serif;font-size:11px;color:#9aa0ad;">
                   You received this because someone added you to a ${kindLabel}.
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
+function expiryLabel(minutes: number) {
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return hours === 1 ? "1 hour" : `${hours} hours`;
+  }
+  return minutes === 1 ? "1 minute" : `${minutes} minutes`;
+}
+
+export function passwordResetSubject() {
+  return "Reset your Baguette password";
+}
+
+export function passwordResetText(input: PasswordResetContent) {
+  const first = input.recipientFirstName.trim() || "there";
+  return [
+    `Hi ${first},`,
+    "",
+    "Someone asked to reset the password on your Baguette account.",
+    "",
+    `Set a new password here: ${input.resetUrl}`,
+    "",
+    `This link works once and expires in ${expiryLabel(input.expiresInMinutes)}.`,
+    "",
+    "If you did not ask for this, you can ignore this email. Your password stays the same.",
+    "",
+    "Baguette — The project operating system",
+  ].join("\n");
+}
+
+export function passwordResetHtml(input: PasswordResetContent) {
+  const first = escapeHtml(input.recipientFirstName.trim() || "there");
+  const resetUrl = escapeHtml(input.resetUrl);
+  const expiry = escapeHtml(expiryLabel(input.expiresInMinutes));
+  const preheader = `Set a new Baguette password. The link expires in ${expiryLabel(input.expiresInMinutes)}.`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta name="supported-color-schemes" content="light" />
+    <title>${escapeHtml(passwordResetSubject())}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Source+Serif+4:ital,wght@0,600;1,600&display=swap" rel="stylesheet" />
+  </head>
+  <body style="margin:0;padding:0;background:#f6f7fb;color:#1f2128;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
+      ${escapeHtml(preheader)}
+    </div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f7fb;margin:0;padding:0;">
+      <tr>
+        <td align="center" style="padding:32px 16px 40px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;">
+            <tr>
+              <td style="background:#111318;border-radius:28px 28px 0 0;padding:28px 32px 26px;">
+                <table role="presentation" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td width="32" height="32" align="center" valign="middle" style="background:#e04e1b;border-radius:10px;width:32px;height:32px;">
+                      <span style="display:block;color:#fff4d5;font-family:Georgia,'Source Serif 4',serif;font-size:16px;line-height:32px;font-weight:700;">b</span>
+                    </td>
+                    <td style="padding-left:10px;color:#ffffff;font-family:Poppins,Arial,Helvetica,sans-serif;font-size:18px;font-weight:600;letter-spacing:-0.02em;">
+                      Baguette
+                    </td>
+                  </tr>
+                </table>
+                <p style="margin:18px 0 0;font-family:Poppins,Arial,Helvetica,sans-serif;font-size:12px;font-weight:500;letter-spacing:0.14em;text-transform:uppercase;color:#ffb45a;">
+                  Project operating system
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="background:#ffffff;padding:36px 32px 8px;">
+                <p style="margin:0;font-family:Poppins,Arial,Helvetica,sans-serif;font-size:13px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#e04e1b;">
+                  Password reset
+                </p>
+                <h1 style="margin:10px 0 0;font-family:'Source Serif 4',Georgia,'Times New Roman',serif;font-size:32px;line-height:1.15;font-weight:600;color:#1f2128;">
+                  Let's get you back in.
+                </h1>
+                <p style="margin:18px 0 0;font-family:Poppins,Arial,Helvetica,sans-serif;font-size:16px;line-height:1.65;color:#323338;">
+                  Hi ${first} — someone asked to reset the password on your Baguette account. Pick a new one and your projects are right where you left them.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="background:#ffffff;padding:22px 32px 8px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f6f7fb;border:1px solid #eceef3;border-radius:18px;">
+                  <tr>
+                    <td style="padding:18px 20px;">
+                      <p style="margin:0;font-family:Poppins,Arial,Helvetica,sans-serif;font-size:11px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;color:#676879;">
+                        Good for
+                      </p>
+                      <p style="margin:6px 0 0;font-family:'Source Serif 4',Georgia,'Times New Roman',serif;font-size:20px;line-height:1.3;font-weight:600;color:#1f2128;">
+                        One use, ${expiry}
+                      </p>
+                      <p style="margin:8px 0 0;font-family:Poppins,Arial,Helvetica,sans-serif;font-size:13px;line-height:1.5;color:#676879;">
+                        Didn't ask for this? Ignore this email and your password stays the same.
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="background:#ffffff;padding:28px 32px 12px;">
+                <a href="${resetUrl}" style="display:inline-block;background:#e04e1b;color:#ffffff;font-family:Poppins,Arial,Helvetica,sans-serif;font-size:14px;font-weight:600;text-decoration:none;border-radius:999px;padding:14px 28px;">
+                  Set a new password
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td style="background:#ffffff;border-radius:0 0 28px 28px;padding:8px 32px 32px;">
+                <p style="margin:0;font-family:Poppins,Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#676879;text-align:center;">
+                  Prefer a direct link?<br />
+                  <a href="${resetUrl}" style="color:#c43d12;text-decoration:underline;word-break:break-all;">${resetUrl}</a>
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:22px 8px 0;text-align:center;">
+                <p style="margin:0;font-family:Poppins,Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#676879;">
+                  Baguette keeps the plan, the board, and the weekly in one kitchen.
+                </p>
+                <p style="margin:8px 0 0;font-family:Poppins,Arial,Helvetica,sans-serif;font-size:11px;color:#9aa0ad;">
+                  You received this because a password reset was requested for this email.
                 </p>
               </td>
             </tr>
