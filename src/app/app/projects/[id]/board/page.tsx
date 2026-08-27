@@ -14,5 +14,13 @@ export default async function BoardPage({
   if (!bundle) notFound();
   const people = bundle.members.map((member) => member.person).filter(Boolean);
   const canEdit = (await getProjectAccessRole(id, session.personId)) === "admin";
-  return <Board tasks={bundle.tasks} people={people} canEdit={canEdit} />;
+  return (
+    <Board
+      tasks={bundle.tasks}
+      people={people}
+      assignees={bundle.assignees}
+      membersByProject={{ [id]: people }}
+      canEdit={canEdit}
+    />
+  );
 }

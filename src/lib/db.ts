@@ -4,6 +4,7 @@ import { createAdminClient } from "./supabase/admin";
 import type {
   AccessRole,
   AccountBundle,
+  PasswordReset,
   Person,
   Phase,
   Portfolio,
@@ -15,6 +16,7 @@ import type {
   ProjectMember,
   StatusReport,
   Task,
+  TaskAssignee,
   TaskDependency,
   Team,
   TeamBundle,
@@ -232,6 +234,71 @@ export async function createAccount(personId: string, passwordHash: string) {
   }
   throwIfError(error);
   await stampLastLogin(personId, now);
+}
+
+export async function updatePasswordHash(personId: string, passwordHash: string) {
+  const { error } = await admin()
+    .from("accounts")
+    .update({ password_hash: passwordHash })
+    .eq("person_id", personId);
+  throwIfError(error);
+}
+
+export async function createPasswordReset(input: {
+  personId: string;
+  tokenHash: string;
+  expiresAt: string;
+}) {
+  const db = admin();
+  // A fresh request retires the older links so only the newest email works.
+  const { error: clearError } = await db
+    .from("password_resets")
+    .update({ used_at: new Date().toISOString() })
+    .eq("person_id", input.personId)
+    .is("used_at", null);
+  throwIfError(clearError);
+
+  const { error } = await db.from("password_resets").insert({
+    person_id: input.personId,
+    token_hash: input.tokenHash,
+    expires_at: input.expiresAt,
+  });
+  throwIfError(error);
+}
+
+export async function getPasswordResetByTokenHash(tokenHash: string) {
+  const { data, error } = await admin()
+    .from("password_resets")
+    .select("id, person_id, expires_at, used_at")
+    .eq("token_hash", tokenHash)
+    .maybeSingle();
+  throwIfError(error);
+  return data as PasswordReset | null;
+}
+
+export async function consumePasswordReset(input: {
+  tokenHash: string;
+  passwordHash: string;
+}) {
+  const reset = await getPasswordResetByTokenHash(input.tokenHash);
+  if (!reset || reset.used_at || new Date(reset.expires_at) <= new Date()) {
+    return { ok: false as const };
+  }
+
+  // Claiming the row before touching the password means a double submit cannot
+  // spend the same link twice.
+  const { data: claimed, error: claimError } = await admin()
+    .from("password_resets")
+    .update({ used_at: new Date().toISOString() })
+    .eq("id", reset.id)
+    .is("used_at", null)
+    .select("id")
+    .maybeSingle();
+  throwIfError(claimError);
+  if (!claimed) return { ok: false as const };
+
+  await updatePasswordHash(reset.person_id, input.passwordHash);
+  return { ok: true as const, personId: reset.person_id };
 }
 
 export async function recordLastLogin(personId: string) {
@@ -495,6 +562,7 @@ export async function getProjectBundle(
     throwIfError(filteredDepError);
     projectDeps = (depRows ?? []) as TaskDependency[];
   }
+  const assignees = await listAssigneesForTasks(taskIds);
 
   const members = ((memberRows ?? []) as Array<
     Omit<ProjectMember, "person"> & { person: Person | Person[] }
@@ -510,6 +578,7 @@ export async function getProjectBundle(
     members,
     phases: (phases ?? []) as Phase[],
     tasks: taskList,
+    assignees,
     dependencies: projectDeps,
   };
 }
@@ -556,6 +625,32 @@ export async function listMembersForProjects(projectIds: string[]) {
     if (!person) return [];
     return [{ project_id: row.project_id, role: row.role, person }];
   });
+}
+
+/** Assignable people keyed by project, since a task can only go to its own members. */
+export async function listMembersByProject(projectIds: string[]) {
+  const rows = await listMembersForProjects(projectIds);
+  const byProject: Record<string, Person[]> = {};
+  for (const row of rows) {
+    const list = byProject[row.project_id] ?? [];
+    list.push(row.person);
+    byProject[row.project_id] = list;
+  }
+  for (const list of Object.values(byProject)) {
+    list.sort((a, b) => a.full_name.localeCompare(b.full_name));
+  }
+  return byProject;
+}
+
+export async function listAssigneesForTasks(taskIds: string[]) {
+  if (taskIds.length === 0) return [] as TaskAssignee[];
+  const { data, error } = await admin()
+    .from("task_assignees")
+    .select("id, task_id, person_id, created_at")
+    .in("task_id", taskIds)
+    .order("created_at", { ascending: true });
+  throwIfError(error);
+  return (data ?? []) as TaskAssignee[];
 }
 
 export async function listTasksForProjects(projectIds: string[]) {
@@ -804,6 +899,28 @@ export async function grantProjectMembership(
   throwIfError(error);
 }
 
+/** Nobody can be made responsible for work they cannot even open. */
+async function assertProjectMembers(projectId: string, personIds: string[]) {
+  if (personIds.length === 0) return;
+  const { data, error } = await admin()
+    .from("project_members")
+    .select("person_id")
+    .eq("project_id", projectId)
+    .in("person_id", personIds);
+  throwIfError(error);
+  const allowed = new Set((data ?? []).map((row) => row.person_id as string));
+  if (personIds.some((id) => !allowed.has(id))) {
+    throw new Error("You can only assign people who are already on this project.");
+  }
+}
+
+async function listPeopleByIds(ids: string[]) {
+  if (ids.length === 0) return [] as Person[];
+  const { data, error } = await admin().from("people").select("*").in("id", ids);
+  throwIfError(error);
+  return (data ?? []) as Person[];
+}
+
 export async function addTask(
   projectId: string,
   personId: string,
@@ -812,6 +929,7 @@ export async function addTask(
     description?: string;
     phaseId?: string | null;
     ownerId?: string | null;
+    assigneeIds?: string[];
     status?: Task["status"];
     priority?: Task["priority"];
     estimateHours?: number | null;
@@ -820,6 +938,12 @@ export async function addTask(
   },
 ) {
   await assertProjectEditor(projectId, personId);
+  const assigneeIds = uniqueIds([
+    ...(input.assigneeIds ?? []),
+    ...(input.ownerId ? [input.ownerId] : []),
+  ]);
+  await assertProjectMembers(projectId, assigneeIds);
+
   const { data, error } = await admin()
     .from("tasks")
     .insert({
@@ -827,7 +951,7 @@ export async function addTask(
       title: input.title,
       description: input.description ?? null,
       phase_id: input.phaseId || null,
-      owner_id: input.ownerId || null,
+      owner_id: assigneeIds[0] ?? null,
       status: input.status ?? "todo",
       priority: input.priority ?? "medium",
       estimate_hours: input.estimateHours ?? null,
@@ -838,6 +962,18 @@ export async function addTask(
     .single();
   throwIfError(error);
   const task = data as Task;
+
+  // The insert trigger already recorded the first assignee from owner_id.
+  if (assigneeIds.length > 1) {
+    const { error: assigneeError } = await admin()
+      .from("task_assignees")
+      .upsert(
+        assigneeIds.slice(1).map((id) => ({ task_id: task.id, person_id: id })),
+        { onConflict: "task_id,person_id", ignoreDuplicates: true },
+      );
+    throwIfError(assigneeError);
+  }
+
   await writeAuditEvent({
     actorId: personId,
     kind: "change",
@@ -848,6 +984,82 @@ export async function addTask(
     targetId: task.id,
   });
   return task;
+}
+
+/**
+ * Replaces the whole assignee list for a task. Everyone named has to already be
+ * on the project. A database trigger keeps tasks.owner_id pointing at whoever
+ * was added first.
+ */
+export async function setTaskAssignees(
+  projectId: string,
+  personId: string,
+  taskId: string,
+  assigneeIds: string[],
+) {
+  await assertProjectEditor(projectId, personId);
+  const wanted = uniqueIds(assigneeIds);
+  await assertProjectMembers(projectId, wanted);
+
+  const db = admin();
+  const { data: task, error: taskError } = await db
+    .from("tasks")
+    .select("id, title")
+    .eq("id", taskId)
+    .eq("project_id", projectId)
+    .maybeSingle();
+  throwIfError(taskError);
+  if (!task) throw new Error("That task is not on this project.");
+
+  const { data: current, error: currentError } = await db
+    .from("task_assignees")
+    .select("person_id")
+    .eq("task_id", taskId);
+  throwIfError(currentError);
+
+  const before = new Set((current ?? []).map((row) => row.person_id as string));
+  const after = new Set(wanted);
+  const added = wanted.filter((id) => !before.has(id));
+  const removed = [...before].filter((id) => !after.has(id));
+  if (added.length === 0 && removed.length === 0) return;
+
+  if (removed.length > 0) {
+    const { error } = await db
+      .from("task_assignees")
+      .delete()
+      .eq("task_id", taskId)
+      .in("person_id", removed);
+    throwIfError(error);
+  }
+  if (added.length > 0) {
+    const { error } = await db
+      .from("task_assignees")
+      .upsert(
+        added.map((id) => ({ task_id: taskId, person_id: id })),
+        { onConflict: "task_id,person_id", ignoreDuplicates: true },
+      );
+    throwIfError(error);
+  }
+
+  const people = await listPeopleByIds(wanted);
+  const names = wanted
+    .map((id) => people.find((person) => person.id === id)?.full_name)
+    .filter((name): name is string => Boolean(name));
+  const title = task.title as string;
+
+  await writeAuditEvent({
+    actorId: personId,
+    kind: "change",
+    action: "task.assigned",
+    summary:
+      names.length > 0
+        ? `Assigned "${title}" to ${names.join(", ")}`
+        : `Unassigned "${title}"`,
+    projectId,
+    targetType: "task",
+    targetId: taskId,
+    metadata: { assignee_ids: wanted },
+  });
 }
 
 export async function updateProjectName(
@@ -913,9 +1125,10 @@ export async function updateTask(
   projectId: string,
   personId: string,
   taskId: string,
+  // Assignment deliberately lives in setTaskAssignees so owner_id can never
+  // drift away from the task_assignees rows behind it.
   patch: Partial<{
     title: string;
-    owner_id: string | null;
     status: Task["status"];
     start_date: string | null;
     due_date: string | null;
@@ -927,7 +1140,7 @@ export async function updateTask(
   await assertProjectEditor(projectId, personId);
   const current = await admin()
     .from("tasks")
-    .select("title, status, owner_id")
+    .select("title, status")
     .eq("id", taskId)
     .eq("project_id", projectId)
     .maybeSingle();
@@ -941,11 +1154,6 @@ export async function updateTask(
   let summary = `Updated "${title}"`;
   if (patch.status) {
     summary = `Moved "${title}" to ${TASK_STATUS_LABEL[patch.status]}`;
-  } else if (patch.owner_id !== undefined) {
-    const owner = patch.owner_id ? await getPersonById(patch.owner_id) : null;
-    summary = owner
-      ? `Assigned "${title}" to ${owner.full_name}`
-      : `Unassigned "${title}"`;
   } else if (patch.due_date !== undefined || patch.start_date !== undefined) {
     summary = `Rescheduled "${title}"`;
   } else if (patch.title) {
@@ -1141,20 +1349,27 @@ export async function getAccessiblePortfolio(
     const portfolio = await assertPortfolioAccess(portfolioId, personId);
     const items = await listPortfolioItems([portfolioId]);
     const projectIds = items.map((item) => item.project_id);
-    const [tasks, phases, people, members] = await Promise.all([
+    const [tasks, phases, people, membersByProject, members] = await Promise.all([
       listTasksForProjects(projectIds),
       listPhasesForProjects(projectIds),
       listPeopleForProjects(projectIds),
+      listMembersByProject(projectIds),
       listPortfolioMembers(portfolioId),
     ]);
-    const dependencies = await listDependenciesForTasks(tasks.map((task) => task.id));
+    const taskIds = tasks.map((task) => task.id);
+    const [dependencies, assignees] = await Promise.all([
+      listDependenciesForTasks(taskIds),
+      listAssigneesForTasks(taskIds),
+    ]);
     return {
       portfolio,
       items,
       projects: items.map((item) => item.project),
       phases,
       tasks,
+      assignees,
       people,
+      membersByProject,
       dependencies,
       members,
     };
@@ -1169,18 +1384,25 @@ export async function getAccountProjectBundle(
 ): Promise<AccountBundle> {
   const projects = await listProjectsForPerson(personId);
   const projectIds = projects.map((project) => project.id);
-  const [tasks, phases, people] = await Promise.all([
+  const [tasks, phases, people, membersByProject] = await Promise.all([
     listTasksForProjects(projectIds),
     listPhasesForProjects(projectIds),
     listPeopleForProjects(projectIds),
+    listMembersByProject(projectIds),
   ]);
-  const dependencies = await listDependenciesForTasks(tasks.map((task) => task.id));
+  const taskIds = tasks.map((task) => task.id);
+  const [dependencies, assignees] = await Promise.all([
+    listDependenciesForTasks(taskIds),
+    listAssigneesForTasks(taskIds),
+  ]);
   return {
     projects,
     colors: colorsForProjects(projects),
     phases,
     tasks,
+    assignees,
     people,
+    membersByProject,
     dependencies,
   };
 }

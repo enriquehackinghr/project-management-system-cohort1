@@ -38,6 +38,13 @@ export type Person = {
   last_login_at?: string | null;
 };
 
+export type PasswordReset = {
+  id: string;
+  person_id: string;
+  expires_at: string;
+  used_at: string | null;
+};
+
 export type Project = {
   id: string;
   name: string;
@@ -88,6 +95,17 @@ export type Task = {
   updated_at: string;
 };
 
+/**
+ * A task can carry several assignees. `tasks.owner_id` mirrors whichever one was
+ * added first, so anything that needs a single accountable name still has one.
+ */
+export type TaskAssignee = {
+  id: string;
+  task_id: string;
+  person_id: string;
+  created_at: string;
+};
+
 export type TaskDependency = {
   id: string;
   predecessor_id: string;
@@ -110,6 +128,7 @@ export type ProjectBundle = {
   members: ProjectMember[];
   phases: Phase[];
   tasks: Task[];
+  assignees: TaskAssignee[];
   dependencies: TaskDependency[];
 };
 
@@ -145,7 +164,10 @@ export type PortfolioBundle = {
   projects: Project[];
   phases: Phase[];
   tasks: Task[];
+  assignees: TaskAssignee[];
   people: Person[];
+  /** Assignable people per project, since a task can only go to its own members. */
+  membersByProject: Record<string, Person[]>;
   dependencies: TaskDependency[];
   members: PortfolioMember[];
 };
@@ -203,7 +225,9 @@ export type AccountBundle = {
   colors: Record<string, string>;
   phases: Phase[];
   tasks: Task[];
+  assignees: TaskAssignee[];
   people: Person[];
+  membersByProject: Record<string, Person[]>;
   dependencies: TaskDependency[];
 };
 

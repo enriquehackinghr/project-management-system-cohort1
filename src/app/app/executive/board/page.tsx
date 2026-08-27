@@ -44,6 +44,8 @@ export default async function ExecutiveBoardPage() {
       <Board
         tasks={bundle.tasks}
         people={bundle.people}
+        assignees={bundle.assignees}
+        membersByProject={bundle.membersByProject}
         projectColors={bundle.colors}
         projectNames={projectNames}
       />

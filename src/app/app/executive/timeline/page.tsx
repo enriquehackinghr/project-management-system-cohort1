@@ -27,6 +27,9 @@ export default async function ExecutiveTimelinePage() {
         name: project.name,
         color: bundle.colors[project.id],
       }))}
+      people={bundle.people}
+      assignees={bundle.assignees}
+      membersByProject={bundle.membersByProject}
     />
   );
 }

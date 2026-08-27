@@ -9,17 +9,19 @@ const requiredName = (label: string) =>
     .min(1, { message: `Enter your ${label}.` })
     .max(80, { message: `${label.charAt(0).toUpperCase()}${label.slice(1)} is too long.` });
 
+const newPassword = z
+  .string()
+  .min(8, { message: "Use at least 8 characters." })
+  .regex(/[A-Za-z]/, { message: "Include at least one letter." })
+  .regex(/[0-9]/, { message: "Include at least one number." });
+
 export const signupSchema = z
   .object({
     firstName: requiredName("first name"),
     lastName: requiredName("last name"),
     email: z.email({ message: "Enter a valid email." }).trim().toLowerCase(),
     emailConfirm: z.email({ message: "Enter a valid email." }).trim().toLowerCase(),
-    password: z
-      .string()
-      .min(8, { message: "Use at least 8 characters." })
-      .regex(/[A-Za-z]/, { message: "Include at least one letter." })
-      .regex(/[0-9]/, { message: "Include at least one number." }),
+    password: newPassword,
     passwordConfirm: z.string().min(1, { message: "Confirm your password." }),
     industry: z
       .string()
@@ -45,6 +47,21 @@ export const loginSchema = z.object({
   password: z.string().min(1, { message: "Enter your password." }),
   next: z.string().optional(),
 });
+
+export const forgotPasswordSchema = z.object({
+  email: z.email({ message: "Enter a valid email." }).trim().toLowerCase(),
+});
+
+export const resetPasswordSchema = z
+  .object({
+    token: z.string().trim().min(1, { message: "This reset link is incomplete." }),
+    password: newPassword,
+    passwordConfirm: z.string().min(1, { message: "Confirm your password." }),
+  })
+  .refine((value) => value.password === value.passwordConfirm, {
+    message: "Passwords must match.",
+    path: ["passwordConfirm"],
+  });
 
 export const profileSchema = z.object({
   firstName: requiredName("first name"),
@@ -94,6 +111,30 @@ export type LoginFormState =
       values?: {
         email?: string;
       };
+    }
+  | undefined;
+
+export type ForgotPasswordFormState =
+  | {
+      errors?: {
+        email?: string[];
+      };
+      message?: string;
+      sent?: boolean;
+      values?: {
+        email?: string;
+      };
+    }
+  | undefined;
+
+export type ResetPasswordFormState =
+  | {
+      errors?: {
+        password?: string[];
+        passwordConfirm?: string[];
+      };
+      message?: string;
+      expired?: boolean;
     }
   | undefined;
 
@@ -219,7 +260,8 @@ export const assistantSchema = z.object({
       task_id: z.string().nullable(),
       project_id: z.string().nullable(),
       name: z.string().nullable(),
-      owner_email: z.string().nullable(),
+      /** The complete list of people responsible, not a delta. Empty unassigns. */
+      assignee_emails: z.array(z.string()),
       start_date: z.string().nullable(),
       due_date: z.string().nullable(),
       status: z.enum(["todo", "in_progress", "blocked", "done"]).nullable(),

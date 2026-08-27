@@ -1,11 +1,14 @@
 import { addDays, clamp, daysBetween, formatDate, todayIso } from "@/lib/dates";
 import {
   TASK_STATUS_LABEL,
+  type Person,
   type Phase,
   type Task,
+  type TaskAssignee,
   type TaskDependency,
   type TaskStatus,
 } from "@/lib/types";
+import { TaskAssignees } from "./TaskAssignees";
 
 const BAR: Record<TaskStatus, string> = {
   todo: "bg-[#c5cad6]",
@@ -14,17 +17,41 @@ const BAR: Record<TaskStatus, string> = {
   done: "bg-olive",
 };
 
+const LABEL_WIDTH = 300;
+const GROUP_HEIGHT = 34;
+const ROW_HEIGHT = 44;
+
 export function Timeline({
   phases,
   tasks,
   dependencies,
   projects,
+  people,
+  assignees,
+  membersByProject,
+  canEdit = true,
 }: {
   phases: Phase[];
   tasks: Task[];
   dependencies: TaskDependency[];
   projects?: Array<{ id: string; name: string; color?: string }>;
+  people: Person[];
+  assignees: TaskAssignee[];
+  /** Portfolio and account timelines mix projects, and each has its own member pool. */
+  membersByProject?: Record<string, Person[]>;
+  canEdit?: boolean;
 }) {
+  const peopleById = new Map(people.map((person) => [person.id, person]));
+  const assigneesByTask = new Map<string, Person[]>();
+  for (const row of assignees) {
+    const person = peopleById.get(row.person_id);
+    if (!person) continue;
+    assigneesByTask.set(row.task_id, [
+      ...(assigneesByTask.get(row.task_id) ?? []),
+      person,
+    ]);
+  }
+  const membersFor = (projectId: string) => membersByProject?.[projectId] ?? people;
   const dated = tasks.filter((task) => task.start_date || task.due_date);
   const starts = [
     ...dated.map((task) => task.start_date ?? task.due_date),
@@ -114,10 +141,10 @@ export function Timeline({
   const taskRows: { task: Task; top: number }[] = [];
   let cursor = 0;
   for (const group of groups) {
-    cursor += 34;
+    cursor += GROUP_HEIGHT;
     for (const task of group.tasks) {
-      taskRows.push({ task, top: cursor + 20 });
-      cursor += 40;
+      taskRows.push({ task, top: cursor + ROW_HEIGHT / 2 });
+      cursor += ROW_HEIGHT;
     }
   }
 
@@ -169,10 +196,10 @@ export function Timeline({
       </div>
 
       <div className="overflow-auto rounded-2xl border border-flour bg-white">
-        <div style={{ minWidth: 252 + chartWidth }}>
+        <div style={{ minWidth: LABEL_WIDTH + chartWidth }}>
           <div
             className="sticky top-0 z-20 grid border-b border-flour bg-white"
-            style={{ gridTemplateColumns: `252px ${chartWidth}px` }}
+            style={{ gridTemplateColumns: `${LABEL_WIDTH}px ${chartWidth}px` }}
           >
             <div className="sticky left-0 z-30 border-r border-flour bg-white px-4 py-3 text-[11px] font-medium uppercase tracking-[0.12em] text-mute">
               Work
@@ -208,7 +235,7 @@ export function Timeline({
               <section key={group.id}>
                 <div
                   className="grid border-b border-flour bg-foam/70"
-                  style={{ gridTemplateColumns: `252px ${chartWidth}px` }}
+                  style={{ gridTemplateColumns: `${LABEL_WIDTH}px ${chartWidth}px` }}
                 >
                   <div className="sticky left-0 z-10 flex items-center gap-2 border-r border-flour bg-foam/70 px-4 py-2 text-[13px] font-semibold">
                     {group.color ? (
@@ -219,7 +246,7 @@ export function Timeline({
                     ) : null}
                     <span className="truncate">{group.name}</span>
                   </div>
-                  <div className="relative h-[34px]">
+                  <div className="relative" style={{ height: GROUP_HEIGHT }}>
                     {phaseWidth > 0 ? (
                       <div
                         className="absolute top-1.5 h-5 rounded-full bg-crust/15"
@@ -244,21 +271,37 @@ export function Timeline({
                     <div
                       key={task.id}
                       className="grid border-b border-flour/80"
-                      style={{ gridTemplateColumns: `252px ${chartWidth}px` }}
+                      style={{ gridTemplateColumns: `${LABEL_WIDTH}px ${chartWidth}px` }}
                     >
-                      <div className="sticky left-0 z-10 flex items-center gap-2 border-r border-flour bg-white px-4 py-2">
+                      <div
+                        className="sticky left-0 z-10 flex items-center gap-2 border-r border-flour bg-white px-4"
+                        style={{ height: ROW_HEIGHT }}
+                      >
                         <span
                           className={`h-2 w-2 shrink-0 rounded-full ${BAR[task.status]}`}
                         />
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <p className="truncate text-[13px] font-medium">{task.title}</p>
-                          <p className="truncate text-[11px] text-mute">
-                            {TASK_STATUS_LABEL[task.status]}
-                            {task.due_date ? ` · ${formatDate(task.due_date)}` : ""}
-                          </p>
+                          <div className="flex items-center gap-1.5 text-[11px] text-mute">
+                            <span className="shrink-0">
+                              {TASK_STATUS_LABEL[task.status]}
+                              {task.due_date ? ` · ${formatDate(task.due_date)}` : ""}
+                            </span>
+                            <span aria-hidden="true">·</span>
+                            <TaskAssignees
+                              projectId={task.project_id}
+                              taskId={task.id}
+                              assignees={assigneesByTask.get(task.id) ?? []}
+                              candidates={membersFor(task.project_id)}
+                              canEdit={canEdit}
+                            />
+                          </div>
                         </div>
                       </div>
-                      <div className="relative h-10 bg-[linear-gradient(to_right,rgba(236,238,243,0.65)_1px,transparent_1px)] bg-[length:48px_100%]">
+                      <div
+                        className="relative bg-[linear-gradient(to_right,rgba(236,238,243,0.65)_1px,transparent_1px)] bg-[length:48px_100%]"
+                        style={{ height: ROW_HEIGHT }}
+                      >
                         {todayLeft != null ? (
                           <div
                             className="absolute top-0 h-full w-px bg-crust/70"
@@ -267,7 +310,7 @@ export function Timeline({
                         ) : null}
                         {pos ? (
                           <div
-                            className={`absolute top-2 h-6 rounded-full ${group.color ? "" : BAR[task.status]}`}
+                            className={`absolute top-2.5 h-6 rounded-full ${group.color ? "" : BAR[task.status]}`}
                             style={{
                               left: pos.left,
                               width: pos.width,
@@ -276,7 +319,7 @@ export function Timeline({
                             title={`${task.title} ${formatDate(task.start_date)} – ${formatDate(task.due_date)}`}
                           />
                         ) : (
-                          <p className="absolute left-3 top-2 text-[11px] text-mute">No dates</p>
+                          <p className="absolute left-3 top-3 text-[11px] text-mute">No dates</p>
                         )}
                       </div>
                     </div>
@@ -287,7 +330,8 @@ export function Timeline({
           })}
 
             <svg
-              className="pointer-events-none absolute top-0 left-[252px]"
+              className="pointer-events-none absolute top-0"
+              style={{ left: LABEL_WIDTH }}
               width={chartWidth}
               height={cursor}
             >

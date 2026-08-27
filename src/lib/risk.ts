@@ -1,4 +1,12 @@
-import type { Phase, Person, Project, Task, TaskDependency, TaskStatus } from "./types";
+import type {
+  Phase,
+  Person,
+  Project,
+  Task,
+  TaskAssignee,
+  TaskDependency,
+  TaskStatus,
+} from "./types";
 import { addDays, daysBetween } from "./dates";
 
 export type RiskKind =
@@ -45,6 +53,15 @@ export function isOpen(task: Task) {
   return OPEN_STATUSES.has(task.status);
 }
 
+/** Everyone responsible for a task, keyed by task id. */
+export function groupAssignees(assignees: TaskAssignee[]) {
+  const byTask = new Map<string, string[]>();
+  for (const row of assignees) {
+    byTask.set(row.task_id, [...(byTask.get(row.task_id) ?? []), row.person_id]);
+  }
+  return byTask;
+}
+
 export const RISK_KIND_LABEL: Record<RiskKind, string> = {
   overdue_task: "Overdue",
   due_soon: "Due soon",
@@ -63,9 +80,11 @@ export function detectRisks(input: {
   tasks: Task[];
   phases: Phase[];
   people: Person[];
+  assignees: TaskAssignee[];
   dependencies: TaskDependency[];
 }): RiskFinding[] {
   const findings: RiskFinding[] = [];
+  const assigneesByTask = groupAssignees(input.assignees);
   const peopleById = new Map(input.people.map((person) => [person.id, person]));
   const projectById = new Map(
     input.projects.map((project) => [project.id, project]),
@@ -134,20 +153,23 @@ export function detectRisks(input: {
     }
   }
 
+  // Shared work lands on every assignee's plate, so each of them carries the estimate.
   const loadByOwner = new Map<string, number>();
   for (const task of input.tasks) {
-    if (!task.owner_id || !isOpen(task)) continue;
-    loadByOwner.set(
-      task.owner_id,
-      (loadByOwner.get(task.owner_id) ?? 0) + Number(task.estimate_hours ?? 0),
-    );
+    if (!isOpen(task)) continue;
+    for (const ownerId of assigneesByTask.get(task.id) ?? []) {
+      loadByOwner.set(
+        ownerId,
+        (loadByOwner.get(ownerId) ?? 0) + Number(task.estimate_hours ?? 0),
+      );
+    }
   }
   for (const [ownerId, hours] of loadByOwner) {
     const person = peopleById.get(ownerId);
     if (!person) continue;
     if (hours > Number(person.capacity_hours_per_week)) {
       const owned = input.tasks.find(
-        (task) => task.owner_id === ownerId && isOpen(task),
+        (task) => isOpen(task) && (assigneesByTask.get(task.id) ?? []).includes(ownerId),
       );
       const project = owned ? projectById.get(owned.project_id) : input.projects[0];
       if (!project) continue;
@@ -317,8 +339,10 @@ export function buildStatusSnapshot(input: {
   project: Project;
   tasks: Task[];
   people: Person[];
+  assignees: TaskAssignee[];
 }) {
   const peopleById = new Map(input.people.map((person) => [person.id, person]));
+  const assigneesByTask = groupAssignees(input.assignees);
   const moved = input.tasks.filter(
     (task) =>
       task.updated_at.slice(0, 10) >= addDays(input.asOf, -7) &&
@@ -349,20 +373,28 @@ export function buildStatusSnapshot(input: {
       overdue: slipped.length,
       blocked: needsDecision.length,
     },
-    moved: moved.map(summarizeTask(peopleById)),
-    slipped: slipped.map(summarizeTask(peopleById)),
-    next: next.slice(0, 12).map(summarizeTask(peopleById)),
-    needs_decision: needsDecision.map(summarizeTask(peopleById)),
+    moved: moved.map(summarizeTask(peopleById, assigneesByTask)),
+    slipped: slipped.map(summarizeTask(peopleById, assigneesByTask)),
+    next: next.slice(0, 12).map(summarizeTask(peopleById, assigneesByTask)),
+    needs_decision: needsDecision.map(summarizeTask(peopleById, assigneesByTask)),
   };
 }
 
-function summarizeTask(peopleById: Map<string, Person>) {
-  return (task: Task) => ({
-    id: task.id,
-    title: task.title,
-    status: task.status,
-    owner: task.owner_id ? peopleById.get(task.owner_id)?.full_name ?? null : null,
-    due_date: task.due_date,
-    updated_at: task.updated_at,
-  });
+function summarizeTask(
+  peopleById: Map<string, Person>,
+  assigneesByTask: Map<string, string[]>,
+) {
+  return (task: Task) => {
+    const owners = (assigneesByTask.get(task.id) ?? [])
+      .map((id) => peopleById.get(id)?.full_name)
+      .filter((name): name is string => Boolean(name));
+    return {
+      id: task.id,
+      title: task.title,
+      status: task.status,
+      owner: owners.length > 0 ? owners.join(", ") : null,
+      due_date: task.due_date,
+      updated_at: task.updated_at,
+    };
+  };
 }

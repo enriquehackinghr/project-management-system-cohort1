@@ -21,19 +21,26 @@ import {
   TASK_STATUSES,
   type Person,
   type Task,
+  type TaskAssignee,
   type TaskStatus,
 } from "@/lib/types";
+import { TaskAssignees } from "./TaskAssignees";
 import { Pill } from "./ui";
 
 export function Board({
   tasks,
   people,
+  assignees,
+  membersByProject,
   projectColors,
   projectNames,
   canEdit = true,
 }: {
   tasks: Task[];
   people: Person[];
+  assignees: TaskAssignee[];
+  /** Portfolio and account boards mix projects, and each has its own member pool. */
+  membersByProject?: Record<string, Person[]>;
   projectColors?: Record<string, string>;
   projectNames?: Record<string, string>;
   canEdit?: boolean;
@@ -41,6 +48,15 @@ export function Board({
   const router = useRouter();
   const [, startTransition] = useTransition();
   const peopleById = new Map(people.map((person) => [person.id, person]));
+  const assigneesByTask = new Map<string, Person[]>();
+  for (const row of assignees) {
+    const person = peopleById.get(row.person_id);
+    if (!person) continue;
+    assigneesByTask.set(row.task_id, [
+      ...(assigneesByTask.get(row.task_id) ?? []),
+      person,
+    ]);
+  }
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   function onDragEnd(event: DragEndEvent) {
@@ -72,7 +88,8 @@ export function Board({
               key={status}
               status={status}
               tasks={tasks.filter((task) => task.status === status)}
-              peopleById={peopleById}
+              assigneesByTask={assigneesByTask}
+              membersFor={(projectId) => membersByProject?.[projectId] ?? people}
               projectColors={projectColors}
               projectNames={projectNames}
               canEdit={canEdit}
@@ -87,14 +104,16 @@ export function Board({
 function Column({
   status,
   tasks,
-  peopleById,
+  assigneesByTask,
+  membersFor,
   projectColors,
   projectNames,
   canEdit,
 }: {
   status: TaskStatus;
   tasks: Task[];
-  peopleById: Map<string, Person>;
+  assigneesByTask: Map<string, Person[]>;
+  membersFor: (projectId: string) => Person[];
   projectColors?: Record<string, string>;
   projectNames?: Record<string, string>;
   canEdit: boolean;
@@ -121,7 +140,8 @@ function Column({
           <Card
             key={task.id}
             task={task}
-            owner={task.owner_id ? peopleById.get(task.owner_id) : undefined}
+            assignees={assigneesByTask.get(task.id) ?? []}
+            members={membersFor(task.project_id)}
             color={projectColors?.[task.project_id]}
             projectName={projectNames?.[task.project_id]}
             canEdit={canEdit}
@@ -134,13 +154,15 @@ function Column({
 
 function Card({
   task,
-  owner,
+  assignees,
+  members,
   color,
   projectName,
   canEdit,
 }: {
   task: Task;
-  owner?: Person;
+  assignees: Person[];
+  members: Person[];
   color?: string;
   projectName?: string;
   canEdit: boolean;
@@ -168,7 +190,13 @@ function Card({
       ) : null}
       <p className="text-[13px] font-medium leading-5">{task.title}</p>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-mute">
-        <span>{owner?.full_name ?? "Unassigned"}</span>
+        <TaskAssignees
+          projectId={task.project_id}
+          taskId={task.id}
+          assignees={assignees}
+          candidates={members}
+          canEdit={canEdit}
+        />
         <span>{formatDate(task.due_date)}</span>
         <Pill tone={task.priority === "high" ? "crust" : task.priority === "medium" ? "wheat" : "mute"}>
           {PRIORITY_LABEL[task.priority]}

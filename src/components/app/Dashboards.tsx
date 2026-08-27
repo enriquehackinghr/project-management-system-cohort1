@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { formatDate } from "@/lib/dates";
-import type { Person, Phase, Project, Task } from "@/lib/types";
+import { groupAssignees } from "@/lib/risk";
+import type { Person, Phase, Project, Task, TaskAssignee } from "@/lib/types";
 import { Card, Pill, ProgressBar } from "./ui";
 
 function progress(tasks: Task[]) {
@@ -58,11 +59,14 @@ export function TeamDashboard({
   asOf,
   tasks,
   people,
+  assignees,
 }: {
   asOf: string;
   tasks: Task[];
   people: Person[];
+  assignees: TaskAssignee[];
 }) {
+  const assigneesByTask = groupAssignees(assignees);
   return (
     <div className="overflow-hidden rounded-2xl border border-flour bg-white">
       <table className="w-full text-left text-sm">
@@ -76,7 +80,9 @@ export function TeamDashboard({
         </thead>
         <tbody>
           {people.map((person) => {
-            const owned = tasks.filter((task) => task.owner_id === person.id);
+            const owned = tasks.filter((task) =>
+              (assigneesByTask.get(task.id) ?? []).includes(person.id),
+            );
             const openHours = owned
               .filter((task) => task.status !== "done")
               .reduce((sum, task) => sum + Number(task.estimate_hours ?? 0), 0);

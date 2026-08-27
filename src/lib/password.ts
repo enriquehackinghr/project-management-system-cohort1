@@ -1,6 +1,12 @@
 import "server-only";
 
-import { randomBytes, scrypt, timingSafeEqual, type ScryptOptions } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  scrypt,
+  timingSafeEqual,
+  type ScryptOptions,
+} from "node:crypto";
 
 const KEY_LENGTH = 32;
 const N = 16384;
@@ -62,4 +68,18 @@ let dummyHashPromise: Promise<string> | null = null;
 export function dummyPasswordHash() {
   dummyHashPromise ??= hashPassword("not-a-real-password");
   return dummyHashPromise;
+}
+
+export const RESET_TOKEN_TTL_MINUTES = 60;
+
+export function createResetToken() {
+  return randomBytes(32).toString("base64url");
+}
+
+/**
+ * Reset tokens are already 256 bits of entropy, so a plain digest is enough —
+ * there is nothing to brute force the way there is with a human password.
+ */
+export function hashResetToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
 }
