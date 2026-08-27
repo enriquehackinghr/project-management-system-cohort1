@@ -4,10 +4,14 @@ import { EditableName } from "@/components/app/EditableName";
 import { PhaseForm, TaskForm } from "@/components/app/ProjectForms";
 import { AddPeopleToWorkForm } from "@/components/app/TeamForms";
 import { Card, Pill, ProgressBar } from "@/components/app/ui";
-import { getAccessibleProject, listOwnedTeamMemberPeople } from "@/lib/db";
+import {
+  getAccessibleProject,
+  getProjectAccessRole,
+  listOwnedTeamMemberPeople,
+} from "@/lib/db";
 import { formatDate } from "@/lib/dates";
 import { requireSession } from "@/lib/session";
-import { PROJECT_STATUS_LABEL } from "@/lib/types";
+import { ACCESS_ROLE_LABEL, PROJECT_STATUS_LABEL } from "@/lib/types";
 
 export default async function ProjectOverviewPage({
   params,
@@ -23,6 +27,8 @@ export default async function ProjectOverviewPage({
   const canManage =
     bundle.project.owner_id === session.personId ||
     bundle.project.created_by_id === session.personId;
+  const canEdit =
+    canManage || (await getProjectAccessRole(id, session.personId)) === "admin";
   const teamPeople = canManage
     ? (await listOwnedTeamMemberPeople(session.personId)).filter(
         (person) => !bundle.members.some((member) => member.person_id === person.id),
@@ -44,7 +50,7 @@ export default async function ProjectOverviewPage({
               label="Project name"
               action={renameProjectAction.bind(null, id)}
               size="page"
-              canEdit={canManage}
+              canEdit={canEdit}
             />
             <p className="mt-2 text-sm text-mute">{bundle.owner?.full_name ?? "Unowned"}</p>
             <p className="mt-2 text-sm leading-6">{bundle.project.goal}</p>
@@ -71,11 +77,17 @@ export default async function ProjectOverviewPage({
       <section className="rounded-2xl border border-flour bg-white p-5">
         <h2 className="mb-4 text-lg font-semibold tracking-tight">Members</h2>
         <div className="mb-4 flex flex-wrap gap-2">
-          {bundle.members.map((member) => (
-            <Pill key={member.id}>
-              {member.person.full_name} · {member.role || "Member"}
-            </Pill>
-          ))}
+          {bundle.members.map((member) => {
+            const owns =
+              member.person_id === bundle.project.owner_id ||
+              member.person_id === bundle.project.created_by_id;
+            return (
+              <Pill key={member.id}>
+                {member.person.full_name} ·{" "}
+                {owns ? "Owner" : ACCESS_ROLE_LABEL[member.access_role]}
+              </Pill>
+            );
+          })}
         </div>
         {canManage ? (
           <>
@@ -97,7 +109,7 @@ export default async function ProjectOverviewPage({
             </li>
           ))}
         </ul>
-        <PhaseForm projectId={id} />
+        {canEdit ? <PhaseForm projectId={id} /> : <ViewOnlyNote />}
       </section>
 
       <section className="rounded-2xl border border-flour bg-white p-5">
@@ -110,9 +122,22 @@ export default async function ProjectOverviewPage({
             </li>
           ))}
         </ul>
-        <TaskForm projectId={id} phases={bundle.phases} people={people} />
+        {canEdit ? (
+          <TaskForm projectId={id} phases={bundle.phases} people={people} />
+        ) : (
+          <ViewOnlyNote />
+        )}
       </section>
     </div>
+  );
+}
+
+function ViewOnlyNote() {
+  return (
+    <p className="text-sm leading-6 text-mute">
+      Your role on this project is view only. Ask a team owner for the admin role to
+      make changes.
+    </p>
   );
 }
 

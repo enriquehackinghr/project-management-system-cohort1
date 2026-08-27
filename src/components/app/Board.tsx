@@ -30,11 +30,13 @@ export function Board({
   people,
   projectColors,
   projectNames,
+  canEdit = true,
 }: {
   tasks: Task[];
   people: Person[];
   projectColors?: Record<string, string>;
   projectNames?: Record<string, string>;
+  canEdit?: boolean;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -42,6 +44,7 @@ export function Board({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   function onDragEnd(event: DragEndEvent) {
+    if (!canEdit) return;
     const overId = event.over?.id;
     if (!overId) return;
     const status = String(overId) as TaskStatus;
@@ -56,20 +59,28 @@ export function Board({
   }
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {TASK_STATUSES.map((status) => (
-          <Column
-            key={status}
-            status={status}
-            tasks={tasks.filter((task) => task.status === status)}
-            peopleById={peopleById}
-            projectColors={projectColors}
-            projectNames={projectNames}
-          />
-        ))}
-      </div>
-    </DndContext>
+    <div className="space-y-3">
+      {canEdit ? null : (
+        <p className="text-sm leading-6 text-mute">
+          View only — ask a team owner for the admin role to move cards.
+        </p>
+      )}
+      <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onDragEnd}>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {TASK_STATUSES.map((status) => (
+            <Column
+              key={status}
+              status={status}
+              tasks={tasks.filter((task) => task.status === status)}
+              peopleById={peopleById}
+              projectColors={projectColors}
+              projectNames={projectNames}
+              canEdit={canEdit}
+            />
+          ))}
+        </div>
+      </DndContext>
+    </div>
   );
 }
 
@@ -79,12 +90,14 @@ function Column({
   peopleById,
   projectColors,
   projectNames,
+  canEdit,
 }: {
   status: TaskStatus;
   tasks: Task[];
   peopleById: Map<string, Person>;
   projectColors?: Record<string, string>;
   projectNames?: Record<string, string>;
+  canEdit: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: status });
   const tints: Record<TaskStatus, string> = {
@@ -111,6 +124,7 @@ function Column({
             owner={task.owner_id ? peopleById.get(task.owner_id) : undefined}
             color={projectColors?.[task.project_id]}
             projectName={projectNames?.[task.project_id]}
+            canEdit={canEdit}
           />
         ))}
       </div>
@@ -123,14 +137,17 @@ function Card({
   owner,
   color,
   projectName,
+  canEdit,
 }: {
   task: Task;
   owner?: Person;
   color?: string;
   projectName?: string;
+  canEdit: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
+    disabled: !canEdit,
   });
   return (
     <div
@@ -142,7 +159,7 @@ function Card({
         borderLeftColor: color,
         borderLeftWidth: color ? 4 : undefined,
       }}
-      className={`cursor-grab rounded-xl border border-flour/70 bg-white p-3 shadow-sm ${isDragging ? "opacity-70" : ""}`}
+      className={`rounded-xl border border-flour/70 bg-white p-3 shadow-sm ${canEdit ? "cursor-grab" : "cursor-default"} ${isDragging ? "opacity-70" : ""}`}
     >
       {projectName ? (
         <p className="mb-1 truncate text-[11px] font-medium" style={{ color }}>

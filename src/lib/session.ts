@@ -1,7 +1,7 @@
 import "server-only";
 
 import { jwtVerify, SignJWT } from "jose";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { SESSION_COOKIE } from "./constants";
 import { getSessionSecret } from "./env";
@@ -76,7 +76,13 @@ export function safeNextPath(value: unknown) {
 export async function requireSession() {
   const session = await getSession();
   if (!session) {
-    redirect("/login");
+    const headerStore = await headers();
+    const path = headerStore.get("x-baguette-path");
+    const next =
+      path && path.startsWith("/") && !path.startsWith("//") && !path.includes("\\")
+        ? `?next=${encodeURIComponent(path)}`
+        : "";
+    redirect(`/login${next}`);
   }
   return session;
 }

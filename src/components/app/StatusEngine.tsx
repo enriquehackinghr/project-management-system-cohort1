@@ -11,10 +11,12 @@ export function StatusEngine({
   projectId,
   asOf,
   reports,
+  canEdit,
 }: {
   projectId: string;
   asOf: string;
   reports: StatusReport[];
+  canEdit: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -64,25 +66,36 @@ export function StatusEngine({
             </p>
             <p className="mt-1 text-sm text-mute">As of {formatDate(asOf)}</p>
           </div>
-          <PrimaryButton type="button" onClick={draft} disabled={pending}>
-            {pending ? "Drafting" : "Draft from live data"}
-          </PrimaryButton>
+          {canEdit ? (
+            <PrimaryButton type="button" onClick={draft} disabled={pending}>
+              {pending ? "Drafting" : "Draft from live data"}
+            </PrimaryButton>
+          ) : null}
         </div>
         {error ? <p className="mt-3 text-sm text-crust">{error}</p> : null}
-        <textarea
-          className={`${textareaClass} mt-4 min-h-56`}
-          value={body}
-          onChange={(event) => setBody(event.target.value)}
-          placeholder="The draft appears here. Edit it before saving."
-        />
-        <PrimaryButton
-          type="button"
-          className="mt-4"
-          onClick={save}
-          disabled={pending || !body || !snapshot}
-        >
-          Save report
-        </PrimaryButton>
+        {canEdit ? (
+          <>
+            <textarea
+              className={`${textareaClass} mt-4 min-h-56`}
+              value={body}
+              onChange={(event) => setBody(event.target.value)}
+              placeholder="The draft appears here. Edit it before saving."
+            />
+            <PrimaryButton
+              type="button"
+              className="mt-4"
+              onClick={save}
+              disabled={pending || !body || !snapshot}
+            >
+              Save report
+            </PrimaryButton>
+          </>
+        ) : (
+          <p className="mt-4 text-sm leading-6 text-mute">
+            Your role on this project is view only. Past reports are below; ask a team
+            owner for the admin role to write a new one.
+          </p>
+        )}
       </Card>
       <div className="space-y-3">
         {reports.map((report) => (

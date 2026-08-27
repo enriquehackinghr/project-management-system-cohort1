@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { Board } from "@/components/app/Board";
-import { getAccessiblePortfolio } from "@/lib/db";
+import { getAccessiblePortfolio, getPortfolioAccessRole } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 
 export default async function PortfolioBoardPage({
@@ -53,6 +53,7 @@ export default async function PortfolioBoardPage({
         people={bundle.people}
         projectColors={projectColors}
         projectNames={projectNames}
+        canEdit={(await getPortfolioAccessRole(id, session.personId)) === "admin"}
       />
     </div>
   );

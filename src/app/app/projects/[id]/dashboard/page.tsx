@@ -43,7 +43,7 @@ export default async function ProjectDashboardPage({
         project={bundle.project}
         tasks={bundle.tasks}
         phases={bundle.phases}
-        riskCount={risks.length}
+        riskCount={risks.filter((risk) => risk.severity !== "low").length}
       />
       <section>
         <h2 className="mb-3 text-lg font-semibold">Team load</h2>

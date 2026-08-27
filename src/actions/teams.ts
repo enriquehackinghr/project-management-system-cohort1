@@ -10,9 +10,11 @@ import {
   createTeam,
   deleteTeam,
   removePeopleFromTeam,
+  setTeamMemberRole,
   updateTeamName,
 } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { ACCESS_ROLES, type AccessRole } from "@/lib/types";
 
 function idsFrom(formData: FormData, name: string) {
   return formData.getAll(name).map((value) => String(value)).filter(Boolean);
@@ -59,6 +61,24 @@ export async function addPeopleToTeamAction(teamId: string, formData: FormData) 
   revalidatePath(`/app/teams/${teamId}`);
   revalidatePath("/app/projects");
   revalidatePath("/app/dashboard");
+}
+
+export async function setTeamMemberRoleAction(
+  teamId: string,
+  personId: string,
+  accessRole: AccessRole,
+) {
+  const session = await requireSession();
+  if (!ACCESS_ROLES.includes(accessRole)) {
+    throw new Error("Pick either the view role or the admin role.");
+  }
+  await setTeamMemberRole(teamId, session.personId, personId, accessRole);
+  revalidatePath("/app/teams");
+  revalidatePath(`/app/teams/${teamId}`);
+  revalidatePath("/app/projects", "layout");
+  revalidatePath("/app/portfolios", "layout");
+  revalidatePath("/app/dashboard");
+  revalidatePath("/app/executive", "layout");
 }
 
 export async function removeTeamMemberAction(teamId: string, personId: string) {

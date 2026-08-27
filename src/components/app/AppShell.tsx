@@ -210,6 +210,7 @@ const PORTFOLIO_LINKS = [
   ["Overview", ""],
   ["Board", "/board"],
   ["Timeline", "/timeline"],
+  ["Risks", "/risks"],
   ["Audit Log", "/audit"],
 ] as const;
 
@@ -217,6 +218,7 @@ const EXECUTIVE_LINKS = [
   ["Overview", ""],
   ["Board", "/board"],
   ["Timeline", "/timeline"],
+  ["Risks", "/risks"],
 ] as const;
 
 export function PortfolioNav({

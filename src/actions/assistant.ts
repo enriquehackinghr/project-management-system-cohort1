@@ -5,6 +5,8 @@ import {
   addProjectToPortfolio,
   addTask,
   getAccessiblePortfolio,
+  getPortfolioAccessRole,
+  getProjectAccessRole,
   getProjectBundle,
   listMembersForProjects,
   listProjectsForPerson,
@@ -21,9 +23,10 @@ import { requireSession } from "@/lib/session";
 import { writeAuditEvent } from "@/lib/audit-store";
 import type { ProjectBundle, TaskStatus } from "@/lib/types";
 
-function compactProject(bundle: ProjectBundle) {
+function compactProject(bundle: ProjectBundle, canEdit: boolean) {
   return {
     id: bundle.project.id,
+    can_edit: canEdit,
     name: bundle.project.name,
     description: bundle.project.description,
     goal: bundle.project.goal,
@@ -130,16 +133,20 @@ export async function askAssistant(
   userMessage: string,
 ) {
   const session = await requireSession();
-  const bundle = await getProjectBundle(projectId, session.personId);
+  const [bundle, role] = await Promise.all([
+    getProjectBundle(projectId, session.personId),
+    getProjectAccessRole(projectId, session.personId),
+  ]);
+  const canEdit = role === "admin";
   const result = await completeJson(
     assistantSchema,
     "project_assistant",
     [
-      { role: "user", content: JSON.stringify(compactProject(bundle)) },
+      { role: "user", content: JSON.stringify(compactProject(bundle, canEdit)) },
       ...history,
       { role: "user", content: userMessage },
     ],
-    "You are the Baguette project assistant. Answer only from the provided project JSON. You may propose create_task, reassign_task, reschedule_task, or update_status. Leave project_id null. Never claim a write happened. Proposed actions wait for explicit user confirmation. Use only member emails and task ids from the JSON. If you cannot do something from the data, say so.",
+    "You are the Baguette project assistant. Answer only from the provided project JSON. If can_edit is true you may propose create_task, reassign_task, reschedule_task, or update_status; if can_edit is false propose nothing and explain that this person has view-only access. Leave project_id null. Never claim a write happened. Proposed actions wait for explicit user confirmation. Use only member emails and task ids from the JSON. If you cannot do something from the data, say so.",
   );
   await writeAuditEvent({
     actorId: session.personId,
@@ -173,7 +180,8 @@ export async function askPortfolioAssistant(
   }
 
   const inPortfolio = new Set(projectIds);
-  const canManage = bundle.portfolio.created_by_id === session.personId;
+  const canManage =
+    (await getPortfolioAccessRole(portfolioId, session.personId)) === "admin";
   const context = {
     portfolio: {
       id: bundle.portfolio.id,

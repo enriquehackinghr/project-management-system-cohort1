@@ -9,6 +9,19 @@ export type SessionPerson = {
 export type ProjectStatus = "planning" | "active" | "on_hold" | "completed";
 export type TaskStatus = "todo" | "in_progress" | "blocked" | "done";
 export type TaskPriority = "low" | "medium" | "high";
+export type AccessRole = "view" | "admin";
+
+export const ACCESS_ROLES: AccessRole[] = ["view", "admin"];
+
+export const ACCESS_ROLE_LABEL: Record<AccessRole, string> = {
+  view: "View",
+  admin: "Admin",
+};
+
+export const ACCESS_ROLE_HINT: Record<AccessRole, string> = {
+  view: "Can see everything, cannot change anything.",
+  admin: "Can edit the content of this work.",
+};
 
 export type Person = {
   id: string;
@@ -45,6 +58,7 @@ export type ProjectMember = {
   project_id: string;
   person_id: string;
   role: string | null;
+  access_role: AccessRole;
   person: Person;
 };
 
@@ -121,6 +135,7 @@ export type PortfolioMember = {
   portfolio_id: string;
   person_id: string;
   role: string | null;
+  access_role: AccessRole;
   person: Person;
 };
 
@@ -148,6 +163,7 @@ export type TeamMember = {
   team_id: string;
   person_id: string;
   role: string | null;
+  access_role: AccessRole;
   person: Person;
 };
 

@@ -10,6 +10,7 @@ import {
   syncOwnedTeamsAccess,
 } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { ACCESS_ROLE_LABEL } from "@/lib/types";
 
 export default async function TeamsPage() {
   const session = await requireSession();
@@ -30,7 +31,7 @@ export default async function TeamsPage() {
       <PageHeader
         kicker="Teams"
         title="Your teams"
-        description="Create a team, add people, then give them a portfolio or a project. The same person can sit on more than one team."
+        description="Create a team, add people, then give them a portfolio or a project. Everyone starts with the view role; give someone the admin role to let them edit that work. The same person can sit on more than one team."
         actions={<CreateTeamModal people={people} />}
       />
       {teams.length === 0 ? (
@@ -67,7 +68,7 @@ export default async function TeamsPage() {
                         key={member.id}
                         className="inline-flex items-center rounded-full bg-foam px-2.5 py-1 text-[12px]"
                       >
-                        {member.person.full_name}
+                        {member.person.full_name} · {ACCESS_ROLE_LABEL[member.access_role]}
                       </span>
                     ))
                   )}

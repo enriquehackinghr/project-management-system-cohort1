@@ -4,7 +4,7 @@ import { parseAsOf } from "@/lib/dates";
 import { buildRadarSnapshot } from "@/lib/radar";
 import { requireSession } from "@/lib/session";
 
-export default async function ProjectRisksPage({
+export default async function PortfolioRisksPage({
   params,
   searchParams,
 }: {
@@ -16,12 +16,12 @@ export default async function ProjectRisksPage({
   const session = await requireSession();
 
   const snapshot = await buildRadarSnapshot({
-    scope: { kind: "project", id },
+    scope: { kind: "portfolio", id },
     personId: session.personId,
     asOf: parseAsOf(asOf),
     ownerId: owner || null,
   });
   if (!snapshot) notFound();
 
-  return <RadarView snapshot={snapshot} basePath={`/app/projects/${id}/risks`} />;
+  return <RadarView snapshot={snapshot} basePath={`/app/portfolios/${id}/risks`} />;
 }

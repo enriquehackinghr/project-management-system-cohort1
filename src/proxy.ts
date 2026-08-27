@@ -3,15 +3,22 @@ import type { NextRequest } from "next/server";
 import { SESSION_COOKIE } from "@/lib/constants";
 
 export function proxy(request: NextRequest) {
-  if (!request.nextUrl.pathname.startsWith("/app")) {
-    return NextResponse.next();
-  }
-  if (!request.cookies.get(SESSION_COOKIE)?.value) {
-    const login = new URL("/login", request.url);
-    login.searchParams.set("next", request.nextUrl.pathname);
+  const { pathname, search } = request.nextUrl;
+  const nextPath = `${pathname}${search}`;
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-baguette-path", nextPath);
+
+  if (pathname.startsWith("/app") && !request.cookies.get(SESSION_COOKIE)?.value) {
+    const login = request.nextUrl.clone();
+    login.pathname = "/login";
+    login.search = "";
+    login.searchParams.set("next", nextPath);
     return NextResponse.redirect(login);
   }
-  return NextResponse.next();
+
+  return NextResponse.next({
+    request: { headers: requestHeaders },
+  });
 }
 
 export const config = {

@@ -10,12 +10,13 @@ import { AddPeopleToWorkForm } from "@/components/app/TeamForms";
 import { Card, Pill, ProgressBar, SecondaryButton } from "@/components/app/ui";
 import {
   getAccessiblePortfolio,
+  getPortfolioAccessRole,
   listOwnedTeamMemberPeople,
   listProjectsForPerson,
 } from "@/lib/db";
 import { formatDate } from "@/lib/dates";
 import { requireSession } from "@/lib/session";
-import { PROJECT_STATUS_LABEL } from "@/lib/types";
+import { ACCESS_ROLE_LABEL, PROJECT_STATUS_LABEL } from "@/lib/types";
 
 export default async function PortfolioOverviewPage({
   params,
@@ -31,8 +32,10 @@ export default async function PortfolioOverviewPage({
   if (!bundle) notFound();
 
   const canManage = bundle.portfolio.created_by_id === session.personId;
+  const canEdit =
+    canManage || (await getPortfolioAccessRole(id, session.personId)) === "admin";
   const memberIds = new Set(bundle.items.map((item) => item.project_id));
-  const available = canManage
+  const available = canEdit
     ? accessible.filter((project) => !memberIds.has(project.id))
     : [];
   const teamPeople = canManage
@@ -54,7 +57,7 @@ export default async function PortfolioOverviewPage({
             label="Portfolio name"
             action={renamePortfolioAction.bind(null, id)}
             size="page"
-            canEdit={canManage}
+            canEdit={canEdit}
           />
         </div>
         <p className="mt-2 text-sm leading-6 text-mute">
@@ -111,7 +114,7 @@ export default async function PortfolioOverviewPage({
                       </p>
                     </div>
                   </div>
-                  {canManage ? (
+                  {canEdit ? (
                     <form action={remove}>
                       <SecondaryButton type="submit" className="h-9 px-3 text-xs">
                         Remove
@@ -123,12 +126,17 @@ export default async function PortfolioOverviewPage({
             })}
           </ul>
         )}
-        {canManage ? (
+        {canEdit ? (
           <>
             <p className="mb-3 text-sm font-medium">Add projects</p>
             <AddProjectsForm portfolioId={id} projects={available} />
           </>
-        ) : null}
+        ) : (
+          <p className="text-sm leading-6 text-mute">
+            Your role on this portfolio is view only. Ask a team owner for the admin
+            role to make changes.
+          </p>
+        )}
       </section>
 
       {canManage ? (
@@ -140,7 +148,10 @@ export default async function PortfolioOverviewPage({
           <div className="mb-4 flex flex-wrap gap-2">
             {bundle.members.map((member) => (
               <Pill key={member.id}>
-                {member.person.full_name} · {member.role || "Member"}
+                {member.person.full_name} ·{" "}
+                {member.person_id === bundle.portfolio.created_by_id
+                  ? "Owner"
+                  : ACCESS_ROLE_LABEL[member.access_role]}
               </Pill>
             ))}
           </div>
