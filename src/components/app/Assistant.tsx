@@ -20,6 +20,7 @@ function FloatingAssistant({
   ariaLabel,
   ask,
   confirmAction,
+  canEdit,
 }: {
   name: string;
   emptyPrompt: string;
@@ -30,6 +31,7 @@ function FloatingAssistant({
     text: string,
   ) => Promise<{ reply: string; proposed_actions: ProposedAction[] }>;
   confirmAction: (action: ProposedAction) => Promise<void>;
+  canEdit: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -51,7 +53,7 @@ function FloatingAssistant({
           ...prev,
           { role: "assistant", content: result.reply },
         ]);
-        setActions(result.proposed_actions);
+        setActions(canEdit ? result.proposed_actions : []);
       } catch (err) {
         setError(err instanceof Error ? err.message : "The assistant could not answer.");
       }
@@ -203,18 +205,25 @@ function FloatingAssistant({
 export function ProjectAssistant({
   projectId,
   projectName,
+  canEdit,
 }: {
   projectId: string;
   projectName: string;
+  canEdit: boolean;
 }) {
   return (
     <FloatingAssistant
       name={projectName}
-      emptyPrompt="Ask about this project. Creates, reassigns, and reschedules wait for a confirm button before anything is written."
+      emptyPrompt={
+        canEdit
+          ? "Ask about this project. Creates, reassigns, and reschedules wait for a confirm button before anything is written."
+          : "Ask about this project. Your role is view only, so the assistant answers questions but cannot change anything."
+      }
       placeholder="Ask about this project…"
       ariaLabel="Project assistant"
       ask={(history, text) => askAssistant(projectId, history, text)}
       confirmAction={(action) => confirmAssistantAction(projectId, action)}
+      canEdit={canEdit}
     />
   );
 }
@@ -222,20 +231,27 @@ export function ProjectAssistant({
 export function PortfolioAssistant({
   portfolioId,
   portfolioName,
+  canEdit,
 }: {
   portfolioId: string;
   portfolioName: string;
+  canEdit: boolean;
 }) {
   return (
     <FloatingAssistant
       name={portfolioName}
-      emptyPrompt="Ask about this portfolio or a project in it. Task writes and portfolio changes wait for a confirm button before anything is written."
+      emptyPrompt={
+        canEdit
+          ? "Ask about this portfolio or a project in it. Task writes and portfolio changes wait for a confirm button before anything is written."
+          : "Ask about this portfolio or a project in it. Your role is view only, so the assistant answers questions but cannot change anything."
+      }
       placeholder="Ask about this portfolio…"
       ariaLabel="Portfolio assistant"
       ask={(history, text) => askPortfolioAssistant(portfolioId, history, text)}
       confirmAction={(action) =>
         confirmPortfolioAssistantAction(portfolioId, action)
       }
+      canEdit={canEdit}
     />
   );
 }

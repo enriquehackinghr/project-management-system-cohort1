@@ -7,6 +7,7 @@ import {
   AddTeamWorkForm,
   DeleteTeamForm,
   RemoveTeamMemberButton,
+  TeamMemberRoleSelect,
 } from "@/components/app/TeamForms";
 import { Card, Pill } from "@/components/app/ui";
 import {
@@ -67,7 +68,12 @@ export default async function TeamDetailPage({
       </div>
 
       <Card>
-        <h2 className="mb-4 text-lg font-semibold tracking-tight">Members</h2>
+        <h2 className="mb-1 text-lg font-semibold tracking-tight">Members</h2>
+        <p className="mb-4 max-w-2xl text-sm leading-6 text-mute">
+          Everyone starts with the view role: they can read this team&apos;s portfolios
+          and projects but change nothing. Give someone the admin role to let them edit
+          that work. Changing a role emails the person right away.
+        </p>
         <div className="mb-4 flex flex-wrap gap-2">
           {bundle.members.map((member) => {
             const isOwner = member.person_id === bundle.team.created_by_id;
@@ -79,11 +85,18 @@ export default async function TeamDetailPage({
                 </p>
                 <p className="text-[12px] text-mute">{member.person.email}</p>
                 {isOwner ? null : (
-                  <RemoveTeamMemberButton
-                    teamId={id}
-                    personId={member.person_id}
-                    name={member.person.full_name}
-                  />
+                  <>
+                    <TeamMemberRoleSelect
+                      teamId={id}
+                      personId={member.person_id}
+                      role={member.access_role}
+                    />
+                    <RemoveTeamMemberButton
+                      teamId={id}
+                      personId={member.person_id}
+                      name={member.person.full_name}
+                    />
+                  </>
                 )}
               </div>
             );

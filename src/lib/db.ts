@@ -2,6 +2,7 @@ import "server-only";
 
 import { createAdminClient } from "./supabase/admin";
 import type {
+  AccessRole,
   AccountBundle,
   Person,
   Phase,
@@ -21,7 +22,8 @@ import type {
 } from "./types";
 import { TASK_STATUS_LABEL } from "./types";
 import { writeAuditEvent, listAuditEvents } from "./audit-store";
-import { joinName } from "./names";
+import { sendAddedToWorkEmail, sendRoleChangedEmail } from "./mail";
+import { joinName, splitName } from "./names";
 import { colorsForProjects, nextPortfolioColor } from "./portfolio-colors";
 
 const admin = () => createAdminClient();
@@ -32,6 +34,18 @@ function throwIfError(error: { message: string } | null) {
   }
 }
 
+/**
+ * The caller is not allowed to see this record. Distinct from a database or
+ * network failure so callers can render "not found" for the former without
+ * hiding the latter behind the same blank 404.
+ */
+export class AccessDeniedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AccessDeniedError";
+  }
+}
+
 function asPerson(value: Person | Person[] | null | undefined): Person | null {
   if (!value) return null;
   return Array.isArray(value) ? (value[0] ?? null) : value;
@@ -39,6 +53,69 @@ function asPerson(value: Person | Person[] | null | undefined): Person | null {
 
 function uniqueIds(ids: Array<string | null | undefined>) {
   return [...new Set(ids.filter((id): id is string => Boolean(id)))];
+}
+
+function normalizeAccessRole(value: unknown): AccessRole {
+  return value === "admin" ? "admin" : "view";
+}
+
+function maxAccessRole(
+  a: AccessRole | null,
+  b: AccessRole | null,
+): AccessRole | null {
+  if (a === "admin" || b === "admin") return "admin";
+  if (a === "view" || b === "view") return "view";
+  return null;
+}
+
+async function getWorkName(kind: "project" | "portfolio", id: string) {
+  if (kind === "project") {
+    const { data, error } = await admin()
+      .from("projects")
+      .select("name")
+      .eq("id", id)
+      .maybeSingle();
+    throwIfError(error);
+    return (data?.name as string | undefined) ?? "a project";
+  }
+  const { data, error } = await admin()
+    .from("portfolios")
+    .select("name")
+    .eq("id", id)
+    .maybeSingle();
+  throwIfError(error);
+  return (data?.name as string | undefined) ?? "a portfolio";
+}
+
+async function notifyAddedToWork(input: {
+  actorId: string;
+  recipients: Array<{ email?: string | null; firstName?: string | null; id?: string | null }>;
+  kind: "project" | "portfolio";
+  workId: string;
+  workName?: string;
+}) {
+  const actor = await getPersonById(input.actorId);
+  const inviterName = actor?.full_name?.trim() || "A teammate";
+  const actorEmail = actor?.email?.trim().toLowerCase();
+  const workName = input.workName ?? (await getWorkName(input.kind, input.workId));
+  const seen = new Set<string>();
+
+  await Promise.all(
+    input.recipients.map((recipient) => {
+      const email = recipient.email?.trim().toLowerCase() ?? "";
+      if (!email || email === actorEmail || seen.has(email)) return;
+      if (recipient.id && recipient.id === input.actorId) return;
+      seen.add(email);
+      return sendAddedToWorkEmail({
+        to: email,
+        recipientFirstName: recipient.firstName?.trim() || "there",
+        inviterName,
+        workKind: input.kind,
+        workName,
+        workId: input.workId,
+      });
+    }),
+  );
 }
 
 export async function upsertPerson(input: {
@@ -231,7 +308,7 @@ export async function listAccessibleProjectIds(personId: string) {
 export async function assertProjectAccess(projectId: string, personId: string) {
   const ids = await listAccessibleProjectIds(personId);
   if (!ids.includes(projectId)) {
-    throw new Error("You do not have access to this project.");
+    throw new AccessDeniedError("You do not have access to this project.");
   }
 }
 
@@ -243,13 +320,127 @@ export async function assertProjectOwner(projectId: string, personId: string) {
     .maybeSingle();
   throwIfError(error);
   if (!data) {
-    throw new Error("You do not have access to this project.");
+    throw new AccessDeniedError("You do not have access to this project.");
   }
   if (data.owner_id !== personId && data.created_by_id !== personId) {
     throw new Error("Only the project owner can add members.");
   }
   await assertProjectAccess(projectId, personId);
   return data as Pick<Project, "id" | "owner_id" | "created_by_id">;
+}
+
+/**
+ * Effective role on a project: the strongest of the direct membership and any
+ * portfolio that contains it. Owners and creators are always admins.
+ * Returns null when the person has no access at all.
+ */
+export async function getProjectAccessRole(
+  projectId: string,
+  personId: string,
+): Promise<AccessRole | null> {
+  const db = admin();
+  const { data: project, error: projectError } = await db
+    .from("projects")
+    .select("owner_id, created_by_id")
+    .eq("id", projectId)
+    .maybeSingle();
+  throwIfError(projectError);
+  if (!project) return null;
+  if (project.owner_id === personId || project.created_by_id === personId) {
+    return "admin";
+  }
+
+  const [{ data: direct, error: directError }, portfolioIds] = await Promise.all([
+    db
+      .from("project_members")
+      .select("access_role")
+      .eq("project_id", projectId)
+      .eq("person_id", personId)
+      .maybeSingle(),
+    listAccessiblePortfolioIds(personId),
+  ]);
+  throwIfError(directError);
+
+  let role: AccessRole | null = direct
+    ? normalizeAccessRole(direct.access_role)
+    : null;
+
+  if (portfolioIds.length > 0) {
+    const { data: containers, error: containerError } = await db
+      .from("portfolio_projects")
+      .select("portfolio_id")
+      .eq("project_id", projectId)
+      .in("portfolio_id", portfolioIds);
+    throwIfError(containerError);
+    const ids = uniqueIds((containers ?? []).map((row) => row.portfolio_id as string));
+    if (ids.length > 0) {
+      const [{ data: owned, error: ownedError }, { data: memberships, error: memberError }] =
+        await Promise.all([
+          db.from("portfolios").select("id").in("id", ids).eq("created_by_id", personId),
+          db
+            .from("portfolio_members")
+            .select("access_role")
+            .in("portfolio_id", ids)
+            .eq("person_id", personId),
+        ]);
+      throwIfError(ownedError);
+      throwIfError(memberError);
+      if ((owned ?? []).length > 0) return "admin";
+      for (const row of memberships ?? []) {
+        role = maxAccessRole(role, normalizeAccessRole(row.access_role));
+      }
+    }
+  }
+
+  return role;
+}
+
+export async function getPortfolioAccessRole(
+  portfolioId: string,
+  personId: string,
+): Promise<AccessRole | null> {
+  const db = admin();
+  const { data: portfolio, error } = await db
+    .from("portfolios")
+    .select("created_by_id")
+    .eq("id", portfolioId)
+    .maybeSingle();
+  throwIfError(error);
+  if (!portfolio) return null;
+  if (portfolio.created_by_id === personId) return "admin";
+
+  const { data, error: memberError } = await db
+    .from("portfolio_members")
+    .select("access_role")
+    .eq("portfolio_id", portfolioId)
+    .eq("person_id", personId)
+    .maybeSingle();
+  throwIfError(memberError);
+  return data ? normalizeAccessRole(data.access_role) : null;
+}
+
+export async function assertProjectEditor(projectId: string, personId: string) {
+  const role = await getProjectAccessRole(projectId, personId);
+  if (!role) {
+    throw new AccessDeniedError("You do not have access to this project.");
+  }
+  if (role !== "admin") {
+    throw new Error(
+      "Your role on this project is view only. Ask a team owner for admin access.",
+    );
+  }
+}
+
+export async function assertPortfolioEditor(portfolioId: string, personId: string) {
+  const role = await getPortfolioAccessRole(portfolioId, personId);
+  if (!role) {
+    throw new AccessDeniedError("You do not have access to this portfolio.");
+  }
+  if (role !== "admin") {
+    throw new Error(
+      "Your role on this portfolio is view only. Ask a team owner for admin access.",
+    );
+  }
 }
 
 export async function getProjectBundle(
@@ -275,7 +466,7 @@ export async function getProjectBundle(
     db.from("people").select("*").eq("id", project.owner_id).maybeSingle(),
     db
       .from("project_members")
-      .select("id, project_id, person_id, role, person:people(*)")
+      .select("id, project_id, person_id, role, access_role, person:people(*)")
       .eq("project_id", projectId),
     db
       .from("phases")
@@ -309,6 +500,7 @@ export async function getProjectBundle(
     Omit<ProjectMember, "person"> & { person: Person | Person[] }
   >).map((row) => ({
     ...row,
+    access_role: normalizeAccessRole(row.access_role),
     person: Array.isArray(row.person) ? row.person[0] : row.person,
   }));
 
@@ -325,8 +517,9 @@ export async function getProjectBundle(
 export async function getAccessibleProject(projectId: string, personId: string) {
   try {
     return await getProjectBundle(projectId, personId);
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof AccessDeniedError) return null;
+    throw error;
   }
 }
 
@@ -466,6 +659,22 @@ export async function createManualProject(input: {
     summary: `Created project "${input.name}"`,
     projectId,
   });
+  await notifyAddedToWork({
+    actorId: input.createdById,
+    kind: "project",
+    workId: projectId,
+    workName: input.name,
+    recipients: members
+      .filter(
+        (member) =>
+          member.email.trim().toLowerCase() !==
+          input.createdByEmail.trim().toLowerCase(),
+      )
+      .map((member) => ({
+        email: member.email,
+        firstName: member.firstName,
+      })),
+  });
   return projectId;
 }
 
@@ -486,6 +695,15 @@ export async function commitPlan(payload: unknown) {
     payload && typeof payload === "object" && "created_by_id" in payload
       ? String(payload.created_by_id)
       : null;
+  const ownerEmail =
+    payload &&
+    typeof payload === "object" &&
+    "project" in payload &&
+    payload.project &&
+    typeof payload.project === "object" &&
+    "owner_email" in payload.project
+      ? String(payload.project.owner_email).trim().toLowerCase()
+      : "";
   if (createdById) {
     await writeAuditEvent({
       actorId: createdById,
@@ -494,6 +712,31 @@ export async function commitPlan(payload: unknown) {
       summary: `Created project "${name}"`,
       projectId,
     });
+    const members =
+      payload && typeof payload === "object" && "members" in payload
+        ? payload.members
+        : [];
+    if (Array.isArray(members)) {
+      await notifyAddedToWork({
+        actorId: createdById,
+        kind: "project",
+        workId: projectId,
+        workName: name,
+        recipients: members.flatMap((member) => {
+          if (!member || typeof member !== "object") return [];
+          const email =
+            "email" in member ? String(member.email).trim().toLowerCase() : "";
+          if (!email || (ownerEmail && email === ownerEmail)) return [];
+          const firstName =
+            "first_name" in member && String(member.first_name).trim()
+              ? String(member.first_name).trim()
+              : splitName(
+                  "full_name" in member ? String(member.full_name) : "",
+                ).firstName;
+          return [{ email, firstName }];
+        }),
+      });
+    }
   }
   return projectId;
 }
@@ -509,7 +752,7 @@ export async function addProjectMember(
     capacityHoursPerWeek?: number;
   },
 ) {
-  await assertProjectAccess(projectId, personId);
+  await assertProjectEditor(projectId, personId);
   const person = await upsertPerson({
     firstName: member.firstName,
     lastName: member.lastName,
@@ -517,6 +760,8 @@ export async function addProjectMember(
     role: member.role,
     capacityHoursPerWeek: member.capacityHoursPerWeek,
   });
+  const existing = await listMembershipPairs([person.id], [projectId], []);
+  const alreadyOnProject = existing.projects.length > 0;
   await grantProjectMembership(projectId, person.id, member.role ?? "Member");
   await writeAuditEvent({
     actorId: personId,
@@ -527,6 +772,20 @@ export async function addProjectMember(
     targetType: "person",
     targetId: person.id,
   });
+  if (!alreadyOnProject) {
+    await notifyAddedToWork({
+      actorId: personId,
+      kind: "project",
+      workId: projectId,
+      recipients: [
+        {
+          id: person.id,
+          email: person.email,
+          firstName: person.first_name,
+        },
+      ],
+    });
+  }
   return person;
 }
 
@@ -534,11 +793,12 @@ export async function grantProjectMembership(
   projectId: string,
   memberId: string,
   role = "Member",
+  accessRole: AccessRole = "view",
 ) {
   const { error } = await admin()
     .from("project_members")
     .upsert(
-      { project_id: projectId, person_id: memberId, role },
+      { project_id: projectId, person_id: memberId, role, access_role: accessRole },
       { onConflict: "project_id,person_id", ignoreDuplicates: true },
     );
   throwIfError(error);
@@ -559,7 +819,7 @@ export async function addTask(
     dueDate?: string | null;
   },
 ) {
-  await assertProjectAccess(projectId, personId);
+  await assertProjectEditor(projectId, personId);
   const { data, error } = await admin()
     .from("tasks")
     .insert({
@@ -595,7 +855,7 @@ export async function updateProjectName(
   personId: string,
   name: string,
 ) {
-  await assertProjectOwner(projectId, personId);
+  await assertProjectEditor(projectId, personId);
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Project name is required.");
   const { error } = await admin()
@@ -618,7 +878,7 @@ export async function updateTaskStatus(
   taskId: string,
   status: Task["status"],
 ) {
-  await assertProjectAccess(projectId, personId);
+  await assertProjectEditor(projectId, personId);
   const current = await admin()
     .from("tasks")
     .select("title, status")
@@ -664,7 +924,7 @@ export async function updateTask(
     priority: Task["priority"];
   }>,
 ) {
-  await assertProjectAccess(projectId, personId);
+  await assertProjectEditor(projectId, personId);
   const current = await admin()
     .from("tasks")
     .select("title, status, owner_id")
@@ -708,7 +968,7 @@ export async function addPhase(
   personId: string,
   input: { name: string; startDate?: string; endDate?: string },
 ) {
-  await assertProjectAccess(projectId, personId);
+  await assertProjectEditor(projectId, personId);
   const { data: existing } = await admin()
     .from("phases")
     .select("sort_order")
@@ -749,7 +1009,7 @@ export async function saveStatusReport(input: {
   snapshot: unknown;
   asOf: string;
 }) {
-  await assertProjectAccess(input.projectId, input.personId);
+  await assertProjectEditor(input.projectId, input.personId);
   const { data, error } = await admin()
     .from("status_reports")
     .insert({
@@ -837,7 +1097,7 @@ export async function listPortfolioItems(portfolioIds: string[]) {
 export async function assertPortfolioAccess(portfolioId: string, personId: string) {
   const ids = await listAccessiblePortfolioIds(personId);
   if (!ids.includes(portfolioId)) {
-    throw new Error("You do not have access to this portfolio.");
+    throw new AccessDeniedError("You do not have access to this portfolio.");
   }
   const { data, error } = await admin()
     .from("portfolios")
@@ -846,7 +1106,7 @@ export async function assertPortfolioAccess(portfolioId: string, personId: strin
     .maybeSingle();
   throwIfError(error);
   if (!data) {
-    throw new Error("You do not have access to this portfolio.");
+    throw new AccessDeniedError("You do not have access to this portfolio.");
   }
   return data as Portfolio;
 }
@@ -862,14 +1122,14 @@ export async function assertPortfolioOwner(portfolioId: string, personId: string
 export async function listPortfolioMembers(portfolioId: string) {
   const { data, error } = await admin()
     .from("portfolio_members")
-    .select("id, portfolio_id, person_id, role, person:people(*)")
+    .select("id, portfolio_id, person_id, role, access_role, person:people(*)")
     .eq("portfolio_id", portfolioId);
   throwIfError(error);
   return ((data ?? []) as Array<Omit<PortfolioMember, "person"> & { person: Person | Person[] | null }>)
     .flatMap((row) => {
       const person = asPerson(row.person);
       if (!person) return [];
-      return [{ ...row, person }];
+      return [{ ...row, access_role: normalizeAccessRole(row.access_role), person }];
     });
 }
 
@@ -898,8 +1158,9 @@ export async function getAccessiblePortfolio(
       dependencies,
       members,
     };
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof AccessDeniedError) return null;
+    throw error;
   }
 }
 
@@ -934,7 +1195,7 @@ export async function createPortfolio(personId: string, name: string) {
     .single();
   throwIfError(error);
   const portfolio = data as Portfolio;
-  await grantPortfolioMembership(portfolio.id, personId, "Owner");
+  await grantPortfolioMembership(portfolio.id, personId, "Owner", "admin");
   await writeAuditEvent({
     actorId: personId,
     kind: "change",
@@ -950,7 +1211,7 @@ export async function updatePortfolioName(
   personId: string,
   name: string,
 ) {
-  await assertPortfolioOwner(portfolioId, personId);
+  await assertPortfolioEditor(portfolioId, personId);
   const trimmed = name.trim();
   if (!trimmed) throw new Error("Portfolio name is required.");
   const { error } = await admin()
@@ -972,7 +1233,7 @@ export async function addProjectToPortfolio(
   personId: string,
   projectId: string,
 ) {
-  await assertPortfolioOwner(portfolioId, personId);
+  await assertPortfolioEditor(portfolioId, personId);
   await assertProjectAccess(projectId, personId);
   const items = await listPortfolioItems([portfolioId]);
   if (items.some((item) => item.project_id === projectId)) {
@@ -1008,7 +1269,7 @@ export async function removeProjectFromPortfolio(
   personId: string,
   projectId: string,
 ) {
-  await assertPortfolioOwner(portfolioId, personId);
+  await assertPortfolioEditor(portfolioId, personId);
   const project = await admin()
     .from("projects")
     .select("name")
@@ -1036,11 +1297,12 @@ export async function grantPortfolioMembership(
   portfolioId: string,
   memberId: string,
   role = "Member",
+  accessRole: AccessRole = "view",
 ) {
   const { error } = await admin()
     .from("portfolio_members")
     .upsert(
-      { portfolio_id: portfolioId, person_id: memberId, role },
+      { portfolio_id: portfolioId, person_id: memberId, role, access_role: accessRole },
       { onConflict: "portfolio_id,person_id", ignoreDuplicates: true },
     );
   throwIfError(error);
@@ -1060,6 +1322,7 @@ async function grantPortfolioProjectsToMembers(
       project_id: projectId,
       person_id: member.person_id,
       role: member.role === "Owner" ? "Owner" : "Member",
+      access_role: normalizeAccessRole(member.access_role),
     })),
   );
   const { error } = await admin()
@@ -1076,6 +1339,9 @@ export async function addPeopleToPortfolio(
   await assertPortfolioOwner(portfolioId, actorId);
   const unique = uniqueIds(memberIds).filter((id) => id !== actorId);
   await assertPeopleOnOwnedTeams(actorId, unique);
+  const existing = await listMembershipPairs(unique, [], [portfolioId]);
+  const already = new Set(existing.portfolios.map((row) => row.person_id));
+  const newcomers: Person[] = [];
   for (const memberId of unique) {
     await grantPortfolioMembership(portfolioId, memberId, "Member");
     const person = await getPersonById(memberId);
@@ -1088,8 +1354,19 @@ export async function addPeopleToPortfolio(
       targetType: "person",
       targetId: memberId,
     });
+    if (person && !already.has(memberId)) newcomers.push(person);
   }
   await grantPortfolioProjectsToMembers(portfolioId);
+  await notifyAddedToWork({
+    actorId,
+    kind: "portfolio",
+    workId: portfolioId,
+    recipients: newcomers.map((person) => ({
+      id: person.id,
+      email: person.email,
+      firstName: person.first_name,
+    })),
+  });
 }
 
 export async function addPeopleToProject(
@@ -1100,6 +1377,9 @@ export async function addPeopleToProject(
   await assertProjectOwner(projectId, actorId);
   const unique = uniqueIds(memberIds).filter((id) => id !== actorId);
   await assertPeopleOnOwnedTeams(actorId, unique);
+  const existing = await listMembershipPairs(unique, [projectId], []);
+  const already = new Set(existing.projects.map((row) => row.person_id));
+  const newcomers: Person[] = [];
   for (const memberId of unique) {
     await grantProjectMembership(projectId, memberId, "Member");
     const person = await getPersonById(memberId);
@@ -1112,7 +1392,18 @@ export async function addPeopleToProject(
       targetType: "person",
       targetId: memberId,
     });
+    if (person && !already.has(memberId)) newcomers.push(person);
   }
+  await notifyAddedToWork({
+    actorId,
+    kind: "project",
+    workId: projectId,
+    recipients: newcomers.map((person) => ({
+      id: person.id,
+      email: person.email,
+      firstName: person.first_name,
+    })),
+  });
 }
 
 export async function listOwnedProjects(personId: string) {
@@ -1142,14 +1433,14 @@ export async function listTeamMembers(teamIds: string[]) {
   if (teamIds.length === 0) return [] as TeamMember[];
   const { data, error } = await admin()
     .from("team_members")
-    .select("id, team_id, person_id, role, person:people(*)")
+    .select("id, team_id, person_id, role, access_role, person:people(*)")
     .in("team_id", teamIds);
   throwIfError(error);
   return ((data ?? []) as Array<Omit<TeamMember, "person"> & { person: Person | Person[] | null }>)
     .flatMap((row) => {
       const person = asPerson(row.person);
       if (!person) return [];
-      return [{ ...row, person }];
+      return [{ ...row, access_role: normalizeAccessRole(row.access_role), person }];
     })
     .sort((a, b) => a.person.full_name.localeCompare(b.person.full_name));
 }
@@ -1206,8 +1497,9 @@ export async function getOwnedTeamBundle(
       projects: teamProjects.map((row) => row.project),
       portfolios: teamPortfolios.map((row) => row.portfolio),
     };
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof AccessDeniedError) return null;
+    throw error;
   }
 }
 
@@ -1220,7 +1512,7 @@ export async function assertTeamOwner(teamId: string, personId: string) {
     .maybeSingle();
   throwIfError(error);
   if (!data) {
-    throw new Error("You do not have access to this team.");
+    throw new AccessDeniedError("You do not have access to this team.");
   }
   return data as Team;
 }
@@ -1272,7 +1564,11 @@ async function assertAccountPeople(memberIds: string[]) {
   }
 }
 
-async function grantAttachedWorkToMembers(teamId: string, memberIds?: string[]) {
+async function grantAttachedWorkToMembers(
+  teamId: string,
+  memberIds?: string[],
+  actorId?: string,
+) {
   const [members, teamProjects, teamPortfolios] = await Promise.all([
     listTeamMembers([teamId]),
     listTeamProjects([teamId]),
@@ -1281,12 +1577,31 @@ async function grantAttachedWorkToMembers(teamId: string, memberIds?: string[]) 
   const onTeam = new Set(members.map((member) => member.person_id));
   const people = uniqueIds(memberIds ?? [...onTeam]).filter((id) => onTeam.has(id));
   if (people.length === 0) return;
+  const teamRoleByPerson = new Map(
+    members.map((member) => [
+      member.person_id,
+      normalizeAccessRole(member.access_role),
+    ]),
+  );
+
+  const projectIds = teamProjects.map((row) => row.project.id);
+  const portfolioIds = teamPortfolios.map((row) => row.portfolio.id);
+  const existing = actorId
+    ? await listMembershipPairs(people, projectIds, portfolioIds)
+    : { projects: [], portfolios: [] };
+  const hadProject = new Set(
+    existing.projects.map((row) => `${row.person_id}:${row.project_id}`),
+  );
+  const hadPortfolio = new Set(
+    existing.portfolios.map((row) => `${row.person_id}:${row.portfolio_id}`),
+  );
 
   const projectRows = teamProjects.flatMap((row) =>
     people.map((personId) => ({
       project_id: row.project.id,
       person_id: personId,
       role: "Member",
+      access_role: teamRoleByPerson.get(personId) ?? "view",
     })),
   );
   if (projectRows.length > 0) {
@@ -1304,6 +1619,7 @@ async function grantAttachedWorkToMembers(teamId: string, memberIds?: string[]) 
       portfolio_id: row.portfolio.id,
       person_id: personId,
       role: "Member",
+      access_role: teamRoleByPerson.get(personId) ?? "view",
     })),
   );
   if (portfolioRows.length > 0) {
@@ -1318,6 +1634,60 @@ async function grantAttachedWorkToMembers(teamId: string, memberIds?: string[]) 
       await grantPortfolioProjectsToMembers(row.portfolio.id);
     }
   }
+
+  if (!actorId) return;
+
+  const personById = new Map(members.map((member) => [member.person_id, member.person]));
+  await Promise.all([
+    ...teamProjects.flatMap((row) => {
+      const recipients = people
+        .filter(
+          (personId) =>
+            personId !== actorId &&
+            !hadProject.has(`${personId}:${row.project.id}`),
+        )
+        .map((personId) => personById.get(personId))
+        .filter((person): person is Person => Boolean(person));
+      if (recipients.length === 0) return [];
+      return [
+        notifyAddedToWork({
+          actorId,
+          kind: "project",
+          workId: row.project.id,
+          workName: row.project.name,
+          recipients: recipients.map((person) => ({
+            id: person.id,
+            email: person.email,
+            firstName: person.first_name,
+          })),
+        }),
+      ];
+    }),
+    ...teamPortfolios.flatMap((row) => {
+      const recipients = people
+        .filter(
+          (personId) =>
+            personId !== actorId &&
+            !hadPortfolio.has(`${personId}:${row.portfolio.id}`),
+        )
+        .map((personId) => personById.get(personId))
+        .filter((person): person is Person => Boolean(person));
+      if (recipients.length === 0) return [];
+      return [
+        notifyAddedToWork({
+          actorId,
+          kind: "portfolio",
+          workId: row.portfolio.id,
+          workName: row.portfolio.name,
+          recipients: recipients.map((person) => ({
+            id: person.id,
+            email: person.email,
+            firstName: person.first_name,
+          })),
+        }),
+      ];
+    }),
+  ]);
 }
 
 async function workGrantedByTeams(teamIds: string[]) {
@@ -1488,8 +1858,13 @@ export async function createTeam(
   throwIfError(error);
   const team = data as Team;
   const rows = [
-    { team_id: team.id, person_id: personId, role: "Owner" },
-    ...unique.map((id) => ({ team_id: team.id, person_id: id, role: "Member" })),
+    { team_id: team.id, person_id: personId, role: "Owner", access_role: "admin" },
+    ...unique.map((id) => ({
+      team_id: team.id,
+      person_id: id,
+      role: "Member",
+      access_role: "view",
+    })),
   ];
   const { error: memberError } = await admin().from("team_members").insert(rows);
   throwIfError(memberError);
@@ -1523,11 +1898,19 @@ export async function addPeopleToTeam(
   const { error } = await admin()
     .from("team_members")
     .upsert(
-      unique.map((id) => ({ team_id: teamId, person_id: id, role: "Member" })),
+      unique.map((id) => ({
+        team_id: teamId,
+        person_id: id,
+        role: "Member",
+        access_role: "view",
+      })),
       { onConflict: "team_id,person_id", ignoreDuplicates: true },
     );
   throwIfError(error);
-  await grantAttachedWorkToMembers(teamId, unique);
+  await grantAttachedWorkToMembers(teamId, unique, actorId);
+  for (const memberId of unique) {
+    await syncPersonWorkRoles(memberId);
+  }
   const [teamProjects, teamPortfolios] = await Promise.all([
     listTeamProjects([teamId]),
     listTeamPortfolios([teamId]),
@@ -1560,6 +1943,159 @@ export async function addPeopleToTeam(
   }
 }
 
+/**
+ * Rewrites the person's project and portfolio roles from the teams they belong
+ * to, taking the strongest role when several teams grant the same work. Work
+ * they own is left alone so a team role can never lock an owner out.
+ */
+async function syncPersonWorkRoles(personId: string) {
+  const db = admin();
+  const { data: teamRows, error } = await db
+    .from("team_members")
+    .select("team_id, access_role")
+    .eq("person_id", personId);
+  throwIfError(error);
+
+  const roleByProject = new Map<string, AccessRole>();
+  const roleByPortfolio = new Map<string, AccessRole>();
+
+  for (const row of teamRows ?? []) {
+    const teamRole = normalizeAccessRole(row.access_role);
+    const granted = await workGrantedByTeams([row.team_id as string]);
+    for (const id of granted.projectIds) {
+      roleByProject.set(id, maxAccessRole(roleByProject.get(id) ?? null, teamRole) ?? "view");
+    }
+    for (const id of granted.portfolioIds) {
+      roleByPortfolio.set(
+        id,
+        maxAccessRole(roleByPortfolio.get(id) ?? null, teamRole) ?? "view",
+      );
+    }
+  }
+
+  if (roleByProject.size > 0) {
+    const { data: owned, error: ownedError } = await db
+      .from("projects")
+      .select("id, owner_id, created_by_id")
+      .in("id", [...roleByProject.keys()]);
+    throwIfError(ownedError);
+    for (const row of owned ?? []) {
+      if (row.owner_id === personId || row.created_by_id === personId) {
+        roleByProject.delete(row.id as string);
+      }
+    }
+  }
+  if (roleByPortfolio.size > 0) {
+    const { data: owned, error: ownedError } = await db
+      .from("portfolios")
+      .select("id")
+      .in("id", [...roleByPortfolio.keys()])
+      .eq("created_by_id", personId);
+    throwIfError(ownedError);
+    for (const row of owned ?? []) roleByPortfolio.delete(row.id as string);
+  }
+
+  for (const role of ["view", "admin"] as AccessRole[]) {
+    const projectIds = [...roleByProject]
+      .filter(([, value]) => value === role)
+      .map(([id]) => id);
+    if (projectIds.length > 0) {
+      const { error: updateError } = await db
+        .from("project_members")
+        .update({ access_role: role })
+        .eq("person_id", personId)
+        .in("project_id", projectIds);
+      throwIfError(updateError);
+    }
+
+    const portfolioIds = [...roleByPortfolio]
+      .filter(([, value]) => value === role)
+      .map(([id]) => id);
+    if (portfolioIds.length > 0) {
+      const { error: updateError } = await db
+        .from("portfolio_members")
+        .update({ access_role: role })
+        .eq("person_id", personId)
+        .in("portfolio_id", portfolioIds);
+      throwIfError(updateError);
+    }
+  }
+
+  return {
+    projectIds: [...roleByProject.keys()],
+    portfolioIds: [...roleByPortfolio.keys()],
+  };
+}
+
+export async function setTeamMemberRole(
+  teamId: string,
+  actorId: string,
+  personId: string,
+  accessRole: AccessRole,
+) {
+  const team = await assertTeamOwner(teamId, actorId);
+  if (personId === team.created_by_id) {
+    throw new Error("The team owner is always an admin.");
+  }
+
+  const members = await listTeamMembers([teamId]);
+  const member = members.find((row) => row.person_id === personId);
+  if (!member) throw new Error("That person is not on this team.");
+
+  const previousRole = normalizeAccessRole(member.access_role);
+  if (previousRole === accessRole) {
+    return { previousRole, newRole: accessRole, changed: false as const };
+  }
+
+  const { error } = await admin()
+    .from("team_members")
+    .update({ access_role: accessRole })
+    .eq("team_id", teamId)
+    .eq("person_id", personId);
+  throwIfError(error);
+
+  const synced = await syncPersonWorkRoles(personId);
+  const summary = `Changed ${member.person.full_name}'s role to ${
+    accessRole === "admin" ? "Admin" : "View"
+  }`;
+  for (const projectId of synced.projectIds) {
+    await writeAuditEvent({
+      actorId,
+      kind: "change",
+      action: "member.role_changed",
+      summary,
+      projectId,
+      targetType: "person",
+      targetId: personId,
+      metadata: { team_id: teamId, from: previousRole, to: accessRole },
+    });
+  }
+  for (const portfolioId of synced.portfolioIds) {
+    await writeAuditEvent({
+      actorId,
+      kind: "change",
+      action: "member.role_changed",
+      summary,
+      portfolioId,
+      targetType: "person",
+      targetId: personId,
+      metadata: { team_id: teamId, from: previousRole, to: accessRole },
+    });
+  }
+
+  const actor = await getPersonById(actorId);
+  await sendRoleChangedEmail({
+    to: member.person.email,
+    recipientFirstName: member.person.first_name,
+    actorName: actor?.full_name?.trim() || "A teammate",
+    teamName: team.name,
+    previousRole,
+    newRole: accessRole,
+  });
+
+  return { previousRole, newRole: accessRole, changed: true as const };
+}
+
 export async function removePeopleFromTeam(
   teamId: string,
   actorId: string,
@@ -1584,6 +2120,9 @@ export async function removePeopleFromTeam(
     .eq("team_id", teamId)
     .in("person_id", leaving);
   throwIfError(error);
+  for (const personId of leaving) {
+    await syncPersonWorkRoles(personId);
+  }
   await writeRevokedAccessAudit(actorId, revoked);
 }
 
@@ -1647,7 +2186,10 @@ export async function attachWorkToTeam(
     throwIfError(error);
   }
 
-  await grantAttachedWorkToMembers(teamId);
+  await grantAttachedWorkToMembers(teamId, undefined, actorId);
+  for (const member of await listTeamMembers([teamId])) {
+    await syncPersonWorkRoles(member.person_id);
+  }
   const ownedProjects = await listOwnedProjects(actorId);
   const ownedPortfolios = await listOwnedPortfolios(actorId);
   for (const projectId of projects) {

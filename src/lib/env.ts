@@ -32,3 +32,26 @@ export function getSessionSecret() {
     "baguette-dev-session-secret"
   );
 }
+
+export function getResendApiKey() {
+  return process.env.RESEND_API_KEY ?? process.env.RESEND_API;
+}
+
+export function getEmailFrom() {
+  return process.env.EMAIL_FROM ?? "Baguette <enrique@hackinghr.io>";
+}
+
+export function getAppUrl() {
+  const raw =
+    process.env.APP_URL ??
+    process.env.RENDER_EXTERNAL_URL ??
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : undefined) ??
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined);
+  if (raw) return raw.replace(/\/$/, "");
+  if (process.env.NODE_ENV === "production") {
+    return "https://project-management-system-cohort1.onrender.com";
+  }
+  return "http://localhost:3000";
+}

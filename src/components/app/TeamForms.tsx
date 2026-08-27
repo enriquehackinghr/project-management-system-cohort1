@@ -10,8 +10,17 @@ import {
   createTeamAction,
   deleteTeamAction,
   removeTeamMemberAction,
+  setTeamMemberRoleAction,
 } from "@/actions/teams";
-import type { Person, Portfolio, Project } from "@/lib/types";
+import {
+  ACCESS_ROLE_HINT,
+  ACCESS_ROLE_LABEL,
+  ACCESS_ROLES,
+  type AccessRole,
+  type Person,
+  type Portfolio,
+  type Project,
+} from "@/lib/types";
 import { CheckboxGroup, PersonPicker } from "./PersonPicker";
 import { Field, inputClass, PrimaryButton, SecondaryButton } from "./ui";
 
@@ -211,6 +220,59 @@ export function AddPeopleToWorkForm({
       <PersonPicker people={people} />
       <PrimaryButton type="submit">Add selected</PrimaryButton>
     </form>
+  );
+}
+
+export function TeamMemberRoleSelect({
+  teamId,
+  personId,
+  role,
+}: {
+  teamId: string;
+  personId: string;
+  role: AccessRole;
+}) {
+  const router = useRouter();
+  const selectId = useId();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <div className="mt-2">
+      <label htmlFor={selectId} className="sr-only">
+        Role
+      </label>
+      <select
+        id={selectId}
+        value={role}
+        disabled={pending}
+        onChange={(event) => {
+          const next = event.target.value as AccessRole;
+          setError(null);
+          startTransition(async () => {
+            try {
+              await setTeamMemberRoleAction(teamId, personId, next);
+              router.refresh();
+            } catch (err) {
+              setError(
+                err instanceof Error ? err.message : "Could not change this role.",
+              );
+            }
+          });
+        }}
+        className="h-8 rounded-lg border border-flour bg-white px-2 text-[12px] font-medium disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {ACCESS_ROLES.map((option) => (
+          <option key={option} value={option}>
+            {ACCESS_ROLE_LABEL[option]}
+          </option>
+        ))}
+      </select>
+      <p className="mt-1 max-w-[16rem] text-[11px] leading-4 text-mute">
+        {pending ? "Saving…" : ACCESS_ROLE_HINT[role]}
+      </p>
+      {error ? <p className="text-[11px] leading-4 text-crust">{error}</p> : null}
+    </div>
   );
 }
 

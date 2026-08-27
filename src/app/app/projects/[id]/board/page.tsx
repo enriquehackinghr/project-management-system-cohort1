@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { Board } from "@/components/app/Board";
-import { getAccessibleProject } from "@/lib/db";
+import { getAccessibleProject, getProjectAccessRole } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 
 export default async function BoardPage({
@@ -13,5 +13,6 @@ export default async function BoardPage({
   const bundle = await getAccessibleProject(id, session.personId);
   if (!bundle) notFound();
   const people = bundle.members.map((member) => member.person).filter(Boolean);
-  return <Board tasks={bundle.tasks} people={people} />;
+  const canEdit = (await getProjectAccessRole(id, session.personId)) === "admin";
+  return <Board tasks={bundle.tasks} people={people} canEdit={canEdit} />;
 }

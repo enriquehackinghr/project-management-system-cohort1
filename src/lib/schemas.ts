@@ -188,6 +188,8 @@ export const statusDraftSchema = z.object({
 });
 
 export const radarInterpretationSchema = z.object({
+  headline: z.string(),
+  summary: z.string(),
   findings: z.array(
     z.object({
       id: z.string(),
@@ -196,6 +198,8 @@ export const radarInterpretationSchema = z.object({
     }),
   ),
 });
+
+export type RadarInterpretation = z.infer<typeof radarInterpretationSchema>;
 
 export const assistantSchema = z.object({
   reply: z.string(),

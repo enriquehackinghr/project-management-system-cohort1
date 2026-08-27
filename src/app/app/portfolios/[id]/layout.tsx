@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { PortfolioNav } from "@/components/app/AppShell";
 import { PortfolioAssistant } from "@/components/app/Assistant";
 import { AuditTracker } from "@/components/app/AuditTracker";
-import { getAccessiblePortfolio } from "@/lib/db";
+import { getAccessiblePortfolio, getPortfolioAccessRole } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 
 export default async function PortfolioLayout({
@@ -17,6 +17,7 @@ export default async function PortfolioLayout({
   const session = await requireSession();
   const bundle = await getAccessiblePortfolio(id, session.personId);
   if (!bundle) notFound();
+  const canEdit = (await getPortfolioAccessRole(id, session.personId)) === "admin";
 
   return (
     <AuditTracker scope="portfolio" portfolioId={id}>
@@ -24,7 +25,7 @@ export default async function PortfolioLayout({
         <PortfolioNav
           portfolioId={id}
           name={bundle.portfolio.name}
-          canEdit={bundle.portfolio.created_by_id === session.personId}
+          canEdit={canEdit}
         />
         <main className="min-w-0 flex-1 overflow-auto px-5 py-7 sm:px-8 sm:py-8">
           {children}
@@ -33,6 +34,7 @@ export default async function PortfolioLayout({
       <PortfolioAssistant
         portfolioId={id}
         portfolioName={bundle.portfolio.name}
+        canEdit={canEdit}
       />
     </AuditTracker>
   );

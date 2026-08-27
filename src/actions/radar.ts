@@ -1,85 +1,106 @@
 "use server";
 
-import {
-  getProjectBundle,
-  listPeopleForProjects,
-  listPhasesForProjects,
-  listProjectsForPerson,
-  listTasksForProjects,
-} from "@/lib/db";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { completeJson } from "@/lib/openai";
-import { detectRisks, type RiskFinding } from "@/lib/risk";
-import { radarInterpretationSchema } from "@/lib/schemas";
-import { requireSession } from "@/lib/session";
+import { z } from "zod";
 import { parseAsOf } from "@/lib/dates";
-import type { TaskDependency } from "@/lib/types";
+import { completeJson } from "@/lib/openai";
+import { buildRadarSnapshot, radarPromptPayload } from "@/lib/radar";
+import {
+  radarInterpretationSchema,
+  type RadarInterpretation,
+} from "@/lib/schemas";
+import { requireSession } from "@/lib/session";
 
-export type InterpretedRisk = RiskFinding & {
-  interpretation: string;
-  recommendation: string;
-};
+const scopeInput = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("project"), id: z.uuid() }),
+  z.object({ kind: z.literal("portfolio"), id: z.uuid() }),
+  z.object({ kind: z.literal("account") }),
+]);
 
-export async function loadRadar(projectId: string | null, asOfRaw?: string) {
+const requestInput = z.object({
+  scope: scopeInput,
+  asOf: z.string().optional(),
+  ownerId: z.uuid().nullable().optional(),
+});
+
+export type RadarInterpretationResult =
+  | { ok: true; data: RadarInterpretation }
+  | { ok: false; error: string };
+
+const INSTRUCTIONS = [
+  "You read a deterministic project risk radar and write the narrative around it.",
+  "Detection already happened. Never invent, drop, or re-score a finding.",
+  "headline: one sentence, under 90 characters, naming the single biggest exposure.",
+  "summary: two or three sentences a delivery lead can paste into an update. Reference the concrete numbers you were given.",
+  "findings: for every id you receive, write a short interpretation of why it matters here and one concrete recommendation.",
+  "Be specific and plain. No hedging, no bullet lists, no markdown.",
+].join(" ");
+
+/** Findings sent to the model, capped so a large portfolio stays inside a sane prompt. */
+const MAX_FINDINGS = 40;
+
+export async function interpretRadar(
+  raw: unknown,
+): Promise<RadarInterpretationResult> {
   const session = await requireSession();
-  const asOf = parseAsOf(asOfRaw);
-  const projects = await listProjectsForPerson(session.personId);
-  const scoped = projectId
-    ? projects.filter((project) => project.id === projectId)
-    : projects;
-  if (projectId) {
-    await getProjectBundle(projectId, session.personId);
-  }
-  const ids = scoped.map((project) => project.id);
-  const [tasks, phases, people] = await Promise.all([
-    listTasksForProjects(ids),
-    listPhasesForProjects(ids),
-    listPeopleForProjects(ids),
-  ]);
-  const taskIds = tasks.map((task) => task.id);
-  let dependencies: TaskDependency[] = [];
-  if (taskIds.length > 0) {
-    const { data } = await createAdminClient()
-      .from("task_dependencies")
-      .select("*")
-      .in("predecessor_id", taskIds);
-    dependencies = (data ?? []) as TaskDependency[];
+
+  const parsed = requestInput.safeParse(raw);
+  if (!parsed.success) {
+    return { ok: false, error: "That radar request was not valid." };
   }
 
-  const findings = detectRisks({
-    asOf,
-    projects: scoped,
-    tasks,
-    phases,
-    people,
-    dependencies,
+  // The client sends only a scope reference. Everything the model sees is
+  // re-derived here through the access-checked loaders.
+  const snapshot = await buildRadarSnapshot({
+    scope: parsed.data.scope,
+    personId: session.personId,
+    asOf: parseAsOf(parsed.data.asOf),
+    ownerId: parsed.data.ownerId ?? null,
   });
 
-  if (findings.length === 0) {
-    return { asOf, findings: [] as InterpretedRisk[] };
+  if (!snapshot) {
+    return { ok: false, error: "You do not have access to that work." };
   }
 
-  const interpreted = await completeJson(
-    radarInterpretationSchema,
-    "risk_radar",
-    [{ role: "user", content: JSON.stringify({ as_of: asOf, findings }) }],
-    "You interpret deterministic project-risk findings. Do not add or drop findings. For each id, write a short interpretation and a concrete recommendation. Detection already happened; you only write.",
-  );
+  if (snapshot.findings.length === 0) {
+    return {
+      ok: true,
+      data: {
+        headline: "No rule fired on this radar.",
+        summary: `Nothing is overdue, blocked, or over capacity as of ${snapshot.asOf}. Keep the due dates current so the radar stays honest.`,
+        findings: [],
+      },
+    };
+  }
 
-  const byId = new Map(
-    interpreted.findings.map((item) => [item.id, item]),
-  );
+  const payload = radarPromptPayload({
+    ...snapshot,
+    findings: snapshot.findings.slice(0, MAX_FINDINGS),
+  });
 
-  return {
-    asOf,
-    findings: findings.map((finding) => ({
-      ...finding,
-      interpretation:
-        byId.get(finding.id)?.interpretation ??
-        "The rule fired. Review the live records before changing the plan.",
-      recommendation:
-        byId.get(finding.id)?.recommendation ??
-        "Open the board and resolve the blocked or overdue work first.",
-    })),
-  };
+  try {
+    const interpreted = await completeJson(
+      radarInterpretationSchema,
+      "risk_radar",
+      [{ role: "user", content: JSON.stringify(payload) }],
+      INSTRUCTIONS,
+    );
+
+    const allowed = new Set(payload.findings.map((finding) => finding.id));
+    return {
+      ok: true,
+      data: {
+        headline: interpreted.headline,
+        summary: interpreted.summary,
+        findings: interpreted.findings.filter((finding) => allowed.has(finding.id)),
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "The model could not read this radar.",
+    };
+  }
 }
