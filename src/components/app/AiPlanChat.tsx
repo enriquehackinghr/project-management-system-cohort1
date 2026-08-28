@@ -130,19 +130,25 @@ export function AiPlanChat({
     setHistory((prev) => [...prev, { role: "user", content: visible }]);
     startTransition(async () => {
       try {
-        const next = await continuePlanChat({
+        const result = await continuePlanChat({
           history,
           userMessage: text,
           files: files.length > 0 ? files : undefined,
         });
+        if (!result.ok) {
+          setError(result.message);
+          return;
+        }
+        const next = result.draft;
+        setFiles([]);
         setHistory((prev) => [
           ...prev,
           { role: "assistant", content: next.assistant_message },
         ]);
         setDraft(next);
         if (next.ready_for_review) setPanel("draft");
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "The model could not return a plan.");
+      } catch {
+        setError("The plan service did not respond. Try sending that again.");
       } finally {
         setReadingDocs(false);
       }
@@ -153,12 +159,18 @@ export function AiPlanChat({
     if (!draft) return;
     setReadingDocs(false);
     setProgress(16);
+    setError(null);
     startTransition(async () => {
       try {
-        const id = await approvePlan(draft);
-        router.push(`/app/projects/${id}`);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Could not write the plan.");
+        const result = await approvePlan(draft);
+        if (!result.ok) {
+          setError(result.message);
+          setPanel("chat");
+          return;
+        }
+        router.push(`/app/projects/${result.projectId}`);
+      } catch {
+        setError("The plan could not be written. Try approving again.");
       }
     });
   }
